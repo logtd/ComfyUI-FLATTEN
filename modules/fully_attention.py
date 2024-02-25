@@ -1,0 +1,268 @@
+# Adapted from https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/attention.py
+import torch
+import torch.nn
+import torch.nn.functional as F
+
+from typing import Optional
+import math
+from torch import nn
+from einops import rearrange
+
+import comfy.model_management
+if comfy.model_management.xformers_enabled():
+    import xformers
+    import xformers.ops
+from comfy.cli_args import args
+import comfy.ops
+ops = comfy.ops.disable_weight_init
+
+
+if args.dont_upcast_attention:
+    print("disabling upcasting of attention")
+    _ATTN_PRECISION = "fp16"
+else:
+    _ATTN_PRECISION = "fp32"
+
+
+# Should be DONE except for KWARGS with a few variables -- VALIDATE/TODO
+class FullyFrameAttention(nn.Module):
+    r"""
+    A cross attention layer.
+
+    Parameters:
+        query_dim (`int`): The number of channels in the query.
+        context_dim (`int`, *optional*):
+            The number of channels in the context. If not given, defaults to `query_dim`.
+        heads (`int`,  *optional*, defaults to 8): The number of heads to use for multi-head attention.
+        dim_head (`int`,  *optional*, defaults to 64): The number of channels in each head.
+        dropout (`float`, *optional*, defaults to 0.0): The dropout probability to use.
+        bias (`bool`, *optional*, defaults to False):
+            Set to `True` for the query, key, and value linear layers to contain a bias parameter.
+    """
+
+    def __init__(
+        self,
+        query_dim: int,
+        context_dim: Optional[int] = None,
+        heads: int = 8,
+        dim_head: int = 64,
+        dropout: float = 0.0,
+        dtype=None,
+        device=None,
+        operations=ops,  # is ops in original CrossAttention module
+        # Flatten params
+        bias=False,
+        added_kv_proj_dim: Optional[int] = None,
+        norm_num_groups: Optional[int] = None,
+    ):
+        super().__init__()
+        inner_dim = dim_head * heads
+        context_dim = context_dim if context_dim is not None else query_dim
+        self.upcast_attention = _ATTN_PRECISION == 'fp32'  # upcast_attention
+        self.upcast_softmax = self.upcast_attention  # upcast_softmax
+
+        self.scale = dim_head**-0.5
+
+        self.heads = heads
+        # for slice_size > 0 the attention score computation
+        # is split across the batch axis to save memory
+        # You can set slice_size with `set_attention_slice`
+        self.sliceable_head_dim = heads
+        self._slice_size = None
+        self._use_memory_efficient_attention_xformers = False
+        self.added_kv_proj_dim = added_kv_proj_dim
+
+        if norm_num_groups is not None:
+            self.group_norm = nn.GroupNorm(
+                num_channels=inner_dim, num_groups=norm_num_groups, eps=1e-5, affine=True)
+        else:
+            self.group_norm = None
+
+        self.to_q = operations.Linear(query_dim, inner_dim, bias=bias)
+        self.to_k = operations.Linear(context_dim, inner_dim, bias=bias)
+        self.to_v = operations.Linear(context_dim, inner_dim, bias=bias)
+
+        if self.added_kv_proj_dim is not None:
+            self.add_k_proj = nn.Linear(added_kv_proj_dim, context_dim)
+            self.add_v_proj = nn.Linear(added_kv_proj_dim, context_dim)
+
+        self.to_out = nn.ModuleList([])
+        self.to_out.append(operations.Linear(inner_dim, query_dim))
+        self.to_out.append(nn.Dropout(dropout))
+
+        self.q = None
+        self.inject_q = None
+        self.k = None
+        self.inject_k = None
+
+    def reshape_heads_to_batch_dim(self, tensor):
+        batch_size, seq_len, dim = tensor.shape
+        head_size = self.heads
+        tensor = tensor.reshape(batch_size, seq_len,
+                                head_size, dim // head_size)
+        tensor = tensor.permute(0, 2, 1, 3).reshape(
+            batch_size * head_size, seq_len, dim // head_size)
+        return tensor
+
+    def reshape_heads_to_batch_dim2(self, tensor):
+        batch_size, seq_len, dim = tensor.shape
+        head_size = self.heads
+        tensor = tensor.reshape(batch_size, seq_len,
+                                head_size, dim // head_size)
+        tensor = tensor.permute(0, 2, 1, 3)
+        return tensor
+
+    def reshape_heads_to_batch_dim3(self, tensor):
+        batch_size1, batch_size2, seq_len, dim = tensor.shape
+        head_size = self.heads
+        tensor = tensor.reshape(batch_size1, batch_size2,
+                                seq_len, head_size, dim // head_size)
+        tensor = tensor.permute(0, 3, 1, 2, 4)
+        return tensor
+
+    def reshape_batch_dim_to_heads(self, tensor):
+        batch_size, seq_len, dim = tensor.shape
+        head_size = self.heads
+        tensor = tensor.reshape(batch_size // head_size,
+                                head_size, seq_len, dim)
+        tensor = tensor.permute(0, 2, 1, 3).reshape(
+            batch_size // head_size, seq_len, dim * head_size)
+        return tensor
+
+    def forward(self, hidden_states, context=None, value=None, mask=None, video_length=None, inter_frame=False, **kwargs):
+        batch_size, sequence_length, _ = hidden_states.shape
+
+        context = context
+
+        h = w = int(math.sqrt(sequence_length))
+        if self.group_norm is not None:
+            hidden_states = self.group_norm(
+                hidden_states.transpose(1, 2)).transpose(1, 2)
+
+        query = self.to_q(hidden_states)  # (bf) x d(hw) x c
+        self.q = query
+        if self.inject_q is not None:
+            query = self.inject_q
+        dim = query.shape[-1]
+        query_old = query.clone()
+
+        # All frames
+        query = rearrange(query, "(b f) d c -> b (f d) c", f=video_length)
+
+        query = self.reshape_heads_to_batch_dim(query)
+
+        if self.added_kv_proj_dim is not None:
+            raise NotImplementedError
+
+        context = context if context is not None else hidden_states
+        key = self.to_k(context)
+        self.k = key
+        if self.inject_k is not None:
+            key = self.inject_k
+        key_old = key.clone()
+        value = self.to_v(context)
+
+        if inter_frame:
+            key = rearrange(key, "(b f) d c -> b f d c",
+                            f=video_length)[:, [0, -1]]
+            value = rearrange(value, "(b f) d c -> b f d c",
+                              f=video_length)[:, [0, -1]]
+            key = rearrange(key, "b f d c -> b (f d) c",)
+            value = rearrange(value, "b f d c -> b (f d) c")
+        else:
+            # All frames
+            key = rearrange(key, "(b f) d c -> b (f d) c", f=video_length)
+            value = rearrange(value, "(b f) d c -> b (f d) c", f=video_length)
+
+        key = self.reshape_heads_to_batch_dim(key)
+        value = self.reshape_heads_to_batch_dim(value)
+
+        if mask is not None:
+            if mask.shape[-1] != query.shape[1]:
+                target_length = query.shape[1]
+                mask = F.pad(mask, (0, target_length), value=0.0)
+                mask = mask.repeat_interleave(self.heads, dim=0)
+
+        # attention, what we cannot get enough of
+        if self._use_memory_efficient_attention_xformers:
+            hidden_states = self._memory_efficient_attention_xformers(
+                query, key, value, mask)
+            # Some versions of xformers return output in fp32, cast it back to the dtype of the input
+            hidden_states = hidden_states.to(query.dtype)
+        else:
+            if self._slice_size is None or query.shape[0] // self._slice_size == 1:
+                hidden_states = self._attention(query, key, value, mask)
+            else:
+                hidden_states = self._sliced_attention(
+                    query, key, value, sequence_length, dim, mask)
+
+        if h in [64]:
+            hidden_states = rearrange(
+                hidden_states, "b (f d) c -> (b f) d c", f=video_length)
+            if self.group_norm is not None:
+                hidden_states = self.group_norm(
+                    hidden_states.transpose(1, 2)).transpose(1, 2)
+
+            if kwargs["old_qk"] == 1:
+                query = query_old
+                key = key_old
+            else:
+                query = hidden_states
+                key = hidden_states
+            value = hidden_states
+
+            traj = kwargs["traj"]
+            traj = rearrange(traj, '(f n) l d -> f n l d',
+                             f=video_length, n=sequence_length)
+            mask = rearrange(
+                kwargs["mask"], '(f n) l -> f n l', f=video_length, n=sequence_length)
+            mask = torch.cat([mask[:, :, 0].unsqueeze(-1),
+                             mask[:, :, -video_length+1:]], dim=-1)
+
+            traj_key_sequence_inds = torch.cat(
+                [traj[:, :, 0, :].unsqueeze(-2), traj[:, :, -video_length+1:, :]], dim=-2)
+            t_inds = traj_key_sequence_inds[:, :, :, 0]
+            x_inds = traj_key_sequence_inds[:, :, :, 1]
+            y_inds = traj_key_sequence_inds[:, :, :, 2]
+
+            query_tempo = query.unsqueeze(-2)
+            _key = rearrange(key, '(b f) (h w) d -> b f h w d',
+                             b=int(batch_size/video_length), f=video_length, h=h, w=w)
+            _value = rearrange(value, '(b f) (h w) d -> b f h w d',
+                               b=int(batch_size/video_length), f=video_length, h=h, w=w)
+            key_tempo = _key[:, t_inds, x_inds, y_inds]
+            value_tempo = _value[:, t_inds, x_inds, y_inds]
+            key_tempo = rearrange(key_tempo, 'b f n l d -> (b f) n l d')
+            value_tempo = rearrange(value_tempo, 'b f n l d -> (b f) n l d')
+
+            mask = rearrange(torch.stack(
+                [mask, mask]),  'b f n l -> (b f) n l')
+            mask = mask[:, None].repeat(1, self.heads, 1, 1).unsqueeze(-2)
+            attn_bias = torch.zeros_like(
+                mask, dtype=key_tempo.dtype)  # regular zeros_like
+            attn_bias[~mask] = -torch.inf
+
+            # flow attention
+            query_tempo = self.reshape_heads_to_batch_dim3(query_tempo)
+            key_tempo = self.reshape_heads_to_batch_dim3(key_tempo)
+            value_tempo = self.reshape_heads_to_batch_dim3(value_tempo)
+
+            attn_matrix2 = query_tempo @ key_tempo.transpose(-2, -1) / math.sqrt(
+                query_tempo.size(-1)) + attn_bias
+            attn_matrix2 = F.softmax(attn_matrix2, dim=-1)
+            out = (attn_matrix2@value_tempo).squeeze(-2)
+
+            hidden_states = rearrange(out, '(b f) k (h w) d -> b (f h w) (k d)', b=int(
+                batch_size/video_length), f=video_length, h=h, w=w)
+
+        # linear proj
+        hidden_states = self.to_out[0](hidden_states)
+
+        # dropout
+        hidden_states = self.to_out[1](hidden_states)
+
+        # All frames
+        hidden_states = rearrange(
+            hidden_states, "b (f d) c -> (b f) d c", f=video_length)
+
+        return hidden_states
