@@ -202,7 +202,7 @@ class UNetModel(nn.Module):
                     #     dims, in_channels, model_channels, 3, padding=1, dtype=self.dtype, device=device)
                     InflatedConv3d(
                         in_channels, model_channels, kernel_size=3, padding=(1, 1))
-                )
+                ).half()
             ]
         )
         self._feature_size = model_channels
@@ -433,13 +433,13 @@ class UNetModel(nn.Module):
             operations.GroupNorm(32, ch, dtype=self.dtype, device=device),
             nn.SiLU(),
             zero_module(InflatedConv3d(model_channels,
-                        out_channels, 3, padding=1, dtype=self.dtype, device=device)),
+                        out_channels, 3, padding=1, dtype=self.dtype, device=device).half()),
         )
         if self.predict_codebook_ids:
             self.id_predictor = nn.Sequential(
                 operations.GroupNorm(32, ch, dtype=self.dtype, device=device),
                 InflatedConv3d(model_channels, n_embed,
-                               1, dtype=self.dtype, device=device),
+                               1, dtype=self.dtype, device=device).half(),
                 # nn.LogSoftmax(dim=1)  # change to cross_entropy and produce non-normalized logits
             )
 

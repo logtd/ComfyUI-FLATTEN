@@ -1,3 +1,4 @@
+from einops import rearrange, repeat
 from .fully_attention import FullyFrameAttention
 from comfy.ldm.modules.attention import FeedForward, CrossAttention
 import torch
@@ -58,6 +59,8 @@ class BasicTransformerBlock(nn.Module):
             dropout=dropout,
             bias=attention_bias,
             context_dim=context_dim if self.disable_self_attn else None,
+            dtype=dtype,
+            device=device,
         )
         self.ff = FeedForward(inner_dim, dim_out=dim, dropout=dropout,
                               glu=gated_ff, dtype=dtype, device=device, operations=operations)
@@ -107,7 +110,7 @@ class BasicTransformerBlock(nn.Module):
             attention_mask=None,  # VALIDATE that this gets sent to the block via transformer_options
             video_length=None,  # VALIDATE that this gets sent to the block via transformer_options
             inter_frame=False,  # VALIDATE that this gets sent to the block via transformer_options
-            **kwargs
+            trajs_dict=None
     ):
         # Comfy setup
         extra_options = {}
@@ -130,9 +133,9 @@ class BasicTransformerBlock(nn.Module):
         # Comfy ff_in
         if self.ff_in:
             x_skip = x
-        x = self.ff_in(self.norm_in(x))
-        if self.is_res:
-            x += x_skip
+            x = self.ff_in(self.norm_in(x))
+            if self.is_res:
+                x += x_skip
 
         # SparseCausal-Attention
         n = self.norm1(x)
@@ -144,12 +147,12 @@ class BasicTransformerBlock(nn.Module):
 
         if "attn1_patch" in transformer_patches:
             patch = transformer_patches["attn1_patch"]
-        if context_attn1 is None:
-            context_attn1 = n
-        value_attn1 = context_attn1
-        for p in patch:
-            n, context_attn1, value_attn1 = p(
-                n, context_attn1, value_attn1, extra_options)
+            if context_attn1 is None:
+                context_attn1 = n
+            value_attn1 = context_attn1
+            for p in patch:
+                n, context_attn1, value_attn1 = p(
+                    n, context_attn1, value_attn1, extra_options)
 
         if block is not None:
             transformer_block = (block[0], block[1], block_index)
@@ -180,7 +183,11 @@ class BasicTransformerBlock(nn.Module):
             n = self.attn1.to_out(n)
         else:
             n = self.attn1(n, context=context_attn1,
-                           value=value_attn1, video_length=video_length, inter_frame=inter_frame)
+                           value=value_attn1,
+                           video_length=video_length,
+                           inter_frame=inter_frame,
+                           attention_mask=attention_mask,
+                           trajs_dict=trajs_dict)
 
         if "attn1_output_patch" in transformer_patches:
             patch = transformer_patches["attn1_output_patch"]

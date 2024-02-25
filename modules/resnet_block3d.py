@@ -1,5 +1,8 @@
 # Adapted from https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/resnet.py
 
+from .downsample3d import Downsample3D
+from .upsample3d import Upsample3D
+from .convs import InflatedConv3d
 from einops import rearrange
 import torch
 import torch.nn as nn
@@ -8,35 +11,31 @@ import torch.nn.functional as F
 import comfy.ops
 ops = comfy.ops.disable_weight_init
 
-from .convs import InflatedConv3d
-from .upsample3d import Upsample3D
-from .downsample3d import Downsample3D
-
 
 # DONE -- with quite a few assumptions
 class ResnetBlock3D(nn.Module):
     def __init__(
         self,
         channels,
-        emb_channels, # =512,
-        dropout, # =0.0,
+        emb_channels,  # =512,
+        dropout,  # =0.0,
         out_channels=None,
         use_conv=False,
-        use_scale_shift_norm=False, # not in flatten
-        dims=2, # not in flatten
-        use_checkpoint=False, # not in flatten
-        up=False, # not in flatten
-        down=False, # not in flatten
-        kernel_size=3, # not in flatten
-        exchange_temb_dims=False, # not in flatten
-        skip_t_emb=False, # not in flatten
-        dtype=None, # not in flatten
-        device=None, # not in flatten
-        operations=ops, # not in flatten
+        use_scale_shift_norm=False,  # not in flatten
+        dims=2,  # not in flatten
+        use_checkpoint=False,  # not in flatten
+        up=False,  # not in flatten
+        down=False,  # not in flatten
+        kernel_size=3,  # not in flatten
+        exchange_temb_dims=False,  # not in flatten
+        skip_t_emb=False,  # not in flatten
+        dtype=None,  # not in flatten
+        device=None,  # not in flatten
+        operations=ops,  # not in flatten
         groups=32,  # not in comfy
-        groups_out=None, # not in comfy
-        pre_norm=True, # not in comfy
-        eps=1e-6, # not in comfy
+        groups_out=None,  # not in comfy
+        pre_norm=True,  # not in comfy
+        eps=1e-6,  # not in comfy
     ):
         super().__init__()
         self.pre_norm = pre_norm
@@ -58,7 +57,6 @@ class ResnetBlock3D(nn.Module):
         if groups_out is None:
             groups_out = groups
 
-        
         # self.norm1 = torch.nn.GroupNorm(num_groups=groups, num_channels=channels, eps=eps, affine=True)
         # self.conv1 = InflatedConv3d(channels, out_channels, kernel_size=3, stride=1, padding=1)
         if isinstance(kernel_size, list):
@@ -67,21 +65,25 @@ class ResnetBlock3D(nn.Module):
             padding = kernel_size // 2
         # from comfy
         self.in_layers = nn.Sequential(
-            torch.nn.GroupNorm(num_groups=groups, num_channels=channels, eps=eps, affine=True), # flatten
-            nn.SiLU(), # comfy
-            InflatedConv3d(channels, out_channels, kernel_size=3, stride=1, padding=padding)
+            operations.GroupNorm(32, channels, dtype=dtype, device=device),
+            nn.SiLU(),  # comfy
+            InflatedConv3d(channels, out_channels, kernel_size=3,
+                           stride=1, padding=padding).half()
         )
 
         self.updown = up or down
         if up:
-            self.h_upd = Upsample3D(channels, False, dims, dtype=dtype, device=device)
-            self.x_upd = Upsample3D(channels, False, dims, dtype=dtype, device=device)
+            self.h_upd = Upsample3D(
+                channels, False, dims, dtype=dtype, device=device)
+            self.x_upd = Upsample3D(
+                channels, False, dims, dtype=dtype, device=device)
         elif down:
-            downsample_padding = 1 # VALIDATE
+            downsample_padding = 1  # VALIDATE
             self.h_upd = Downsample3D(
-                        out_channels, use_conv=True, out_channels=out_channels, padding=downsample_padding, name="op"
-                    )
-            self.x_upd = Downsample3D(channels, False, dims, dtype=dtype, device=device)
+                out_channels, use_conv=True, out_channels=out_channels, padding=downsample_padding, name="op"
+            )
+            self.x_upd = Downsample3D(
+                channels, False, dims, dtype=dtype, device=device)
         else:
             self.h_upd = self.x_upd = nn.Identity()
 
@@ -112,14 +114,15 @@ class ResnetBlock3D(nn.Module):
         # self.norm2 = torch.nn.GroupNorm(num_groups=groups_out, num_channels=out_channels, eps=eps, affine=True)
         # self.dropout = torch.nn.Dropout(dropout)
         # self.conv2 = InflatedConv3d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        
+
         self.out_layers = nn.Sequential(
-            operations.GroupNorm(32, self.out_channels, dtype=dtype, device=device),
+            operations.GroupNorm(32, self.out_channels,
+                                 dtype=dtype, device=device),
             nn.SiLU(),
             nn.Dropout(p=dropout),
             # operations.conv_nd(dims, self.out_channels, self.out_channels, kernel_size, padding=padding, dtype=dtype, device=device)
-            InflatedConv3d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, dtype=dtype, device=device)
-            ,
+            InflatedConv3d(out_channels, out_channels, kernel_size=3,
+                           stride=1, padding=1, dtype=dtype, device=device),
         )
 
         # covered in in_layers default to silu
@@ -142,11 +145,13 @@ class ResnetBlock3D(nn.Module):
             # self.skip_connection = operations.conv_nd(
             #     dims, channels, self.out_channels, kernel_size, padding=padding, dtype=dtype, device=device
             # )
-            self.skip_connection = InflatedConv3d(channels, out_channels, kernel_size=kernel_size, padding=padding)
+            self.skip_connection = InflatedConv3d(
+                channels, out_channels, kernel_size=kernel_size, padding=padding).to(dtype)
         else:
             # self.skip_connection = operations.conv_nd(dims, channels, self.out_channels, 1, dtype=dtype, device=device)
-            self.skip_connection = InflatedConv3d(channels, out_channels, kernel_size=1) # validate 1 should be kernel_size
-        
+            self.skip_connection = InflatedConv3d(channels, out_channels, kernel_size=1).half(
+            ).to(dtype)  # validate 1 should be kernel_size
+
         # save features
         self.out_layers_features = None
         self.out_layers_inject_features = None
@@ -163,7 +168,8 @@ class ResnetBlock3D(nn.Module):
             in_rest, in_conv = self.in_layers[:-1], self.in_layers[-1]
             h = in_rest(x)
             h = self.h_upd(h)
-            x = self.x_upd(x)  # VALIDATE this changed x ... should it also change input_tensor?
+            # VALIDATE this changed x ... should it also change input_tensor?
+            x = self.x_upd(x)
             h = in_conv(h)
         else:
             h = self.in_layers(x)
@@ -184,8 +190,8 @@ class ResnetBlock3D(nn.Module):
 
         # hidden_states = self.dropout(hidden_states)
         # hidden_states = self.conv2(hidden_states)
-            
-        emb = temb 
+
+        emb = temb
         emb_out = None
         if not self.skip_t_emb:
             emb_out = self.emb_layers(emb).type(h.dtype)
@@ -207,12 +213,12 @@ class ResnetBlock3D(nn.Module):
             h = self.out_layers(h)
 
         if self.skip_connection is not None:
-            x = self.skip_connection(x)  # VALIDATE This was changed to x instead of input_tensor
+            input_tensor = self.skip_connection(input_tensor)
 
         # save features  -- VALIDATE that nothing was skipped above
         self.out_layers_features = h
         if self.out_layers_inject_features is not None:
-            h = self.out_layers_inject_features 
+            h = self.out_layers_inject_features
 
         output_tensor = input_tensor + h
 

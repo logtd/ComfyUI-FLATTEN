@@ -27,7 +27,7 @@ class Downsample3D(nn.Module):
 
         if use_conv:
             self.op = InflatedConv3d(
-                self.channels, self.out_channels, 3, stride=stride, padding=padding)
+                self.channels, self.out_channels, 3, stride=stride, padding=padding).half()
         else:
             raise NotImplementedError
 

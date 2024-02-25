@@ -74,13 +74,13 @@ class Transformer3DModel(nn.Module):
 
         # check resolution
         resolu = hidden_states.shape[-1]
-        trajs = {}
-        trajs["traj"] = transformer_options["flatten"]["trajs"]["traj{}".format(
+        trajs_dict = {}
+        trajs_dict["traj"] = transformer_options["flatten"]["trajs"]["traj{}".format(
             resolu)]
-        trajs["mask"] = transformer_options["flatten"]["trajs"]["mask{}".format(
+        trajs_dict["traj_mask"] = transformer_options["flatten"]["trajs"]["mask{}".format(
             resolu)]
-        trajs["t"] = transformer_options["flatten"]["t"]
-        trajs["old_qk"] = transformer_options["flatten"]["old_qk"]
+        # trajs["t"] = transformer_options["flatten"]["t"]
+        trajs_dict["old_qk"] = transformer_options["flatten"]["old_qk"]
 
         hidden_states = self.norm(hidden_states)
         if not self.use_linear:
@@ -102,7 +102,8 @@ class Transformer3DModel(nn.Module):
                 # timestep=timestep,
                 video_length=video_length,
                 inter_frame=inter_frame,
-                **trajs
+                transformer_options=transformer_options,
+                trajs_dict=trajs_dict
             )
 
         # Output

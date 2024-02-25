@@ -26,7 +26,7 @@ class Upsample3D(nn.Module):
         conv = None
         if use_conv:
             self.conv = InflatedConv3d(
-                self.channels, self.out_channels, 3, padding=padding)
+                self.channels, self.out_channels, 3, padding=padding).half()
 
             self.Conv2d_0 = conv
 

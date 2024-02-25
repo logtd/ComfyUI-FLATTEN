@@ -3,7 +3,7 @@ import comfy.samplers
 import torch
 
 
-class KSamplerFlattenNode:
+class UnsamplerFlattenNode:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
@@ -11,10 +11,9 @@ class KSamplerFlattenNode:
                  "add_noise": (["enable", "disable"], ),
                  "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                  "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
-                 "injection_steps": ("INT", {"default": 15, "min": 1, "max": 10000}),
                  "old_qk": ("INT", {"default": 0, "min": 0, "max": 1}),
-                 "trajectories": ("TRAJECTORY",),
-                 "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
+                 "trajectories": ("TRAJECTORY", ),
+                    "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
                  "sampler_name": (comfy.samplers.KSampler.SAMPLERS, ),
                  "scheduler": (comfy.samplers.KSampler.SCHEDULERS, ),
                  "positive": ("CONDITIONING", ),
@@ -31,11 +30,11 @@ class KSamplerFlattenNode:
 
     CATEGORY = "sampling"
 
-    def sample(self, model, add_noise, noise_seed, steps, injection_steps, old_qk, trajectories, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0):
+    def sample(self, model, add_noise, noise_seed, steps, old_qk, trajectories, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0):
         # PREPARTION
         latent = latent_image
         latent_image = latent["samples"]
-        injections = latent["injections"]
+        latent_image = rearrange(latent_image, "(b f) c h w -> b c f h w", b=1)
         transformer_options = {
             'flatten': {
                 'trajs': trajectories,
@@ -43,9 +42,7 @@ class KSamplerFlattenNode:
             }
         }
         model.model_options['transformer_options'] = transformer_options
-
-        # DO CLEANUP HERE JUST IN CASE
-
+        # UNSAMPLER
         device = comfy.model_management.get_torch_device()
 
         end_at_step = steps
@@ -56,10 +53,6 @@ class KSamplerFlattenNode:
         if "noise_mask" in latent:
             noise_mask = comfy.sample.prepare_mask(
                 latent["noise_mask"], noise.shape, device)
-
-        noise = torch.zeros(latent_image.size(
-        ), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
-        noise_mask = None
 
         real_model = None
         real_model = model.model
@@ -79,24 +72,22 @@ class KSamplerFlattenNode:
         sampler = comfy.samplers.KSampler(real_model, steps=steps, device=device, sampler=sampler_name,
                                           scheduler=scheduler, denoise=1.0, model_options=model.model_options)
 
-        sigmas = sampler.sigmas
+        sigmas = sigmas = sampler.sigmas.flip(0) + 0.0001
 
         pbar = comfy.utils.ProgressBar(steps)
 
         def callback(step, x0, x, total_steps):
-            pbar.update_absolute(step +
-                                 1, steps)
+            pbar.update_absolute(step + 1, steps)
 
-        for i in range(len(sigmas)):
-            if i < injection_steps:
-                continue  # DO INJECTION HERE
-            samples = sampler.sample(noise, positive, negative, cfg=cfg, latent_image=latent_image, force_full_denoise=False,
-                                     denoise_mask=noise_mask, sigmas=[sigmas[i], sigmas[i+1]], start_step=0, last_step=end_at_step, callback=callback)
-        samples = samples.cpu()
+        # DO A CLEANUP HERE JUST IN CASE
+        for i in range(len(sigmas[:-1])):
+            inversion_sigmas = [sigmas[i], sigmas[i+1]]
+            noise = sampler.sample(noise, positive, negative, cfg=cfg, latent_image=latent_image, force_full_denoise=False,
+                                   denoise_mask=noise_mask, sigmas=inversion_sigmas, start_step=0, last_step=end_at_step, callback=callback)
+            # GRAB INJECTIONS HERE
+
+        noise = noise.cpu()
 
         comfy.sample.cleanup_additional_models(models)
 
-        out = latent.copy()
-        out["samples"] = samples
-
-        return (out, )
+        return {'samples': noise, 'injections': {}}

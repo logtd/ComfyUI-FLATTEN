@@ -1,7 +1,9 @@
 import random
+from einops import rearrange
 import torch
 from torchvision.models.optical_flow import Raft_Large_Weights
 from torchvision.models.optical_flow import raft_large
+import torchvision.transforms.functional as F
 
 
 # TODO hard coded 512
@@ -9,6 +11,50 @@ def preprocess(img1_batch, img2_batch, transforms):
     img1_batch = F.resize(img1_batch, size=[512, 512], antialias=False)
     img2_batch = F.resize(img2_batch, size=[512, 512], antialias=False)
     return transforms(img1_batch, img2_batch)
+
+#  "f h w c -> f c h w"
+
+
+def keys_with_same_value(dictionary):
+    result = {}
+    for key, value in dictionary.items():
+        if value not in result:
+            result[value] = [key]
+        else:
+            result[value].append(key)
+
+    conflict_points = {}
+    for k in result.keys():
+        if len(result[k]) > 1:
+            conflict_points[k] = result[k]
+    return conflict_points
+
+
+def find_duplicates(input_list):
+    seen = set()
+    duplicates = set()
+
+    for item in input_list:
+        if item in seen:
+            duplicates.add(item)
+        else:
+            seen.add(item)
+
+    return list(duplicates)
+
+
+def neighbors_index(point, window_size, H, W):
+    """return the spatial neighbor indices"""
+    t, x, y = point
+    neighbors = []
+    for i in range(-window_size, window_size + 1):
+        for j in range(-window_size, window_size + 1):
+            if i == 0 and j == 0:
+                continue
+            if x + i < 0 or x + i >= H or y + j < 0 or y + j >= W:
+                continue
+            neighbors.append((t, x + i, y + j))
+    return neighbors
 
 
 @torch.no_grad()
@@ -23,7 +69,8 @@ def sample_trajectories(frames, device):
     model = raft_large(weights=Raft_Large_Weights.DEFAULT,
                        progress=False).to(device)
     model = model.eval()
-
+    # TODO should this be "f w h c -> f c h w"?
+    frames = rearrange(frames,  "f h w c -> f c h w")
     current_frames, next_frames = preprocess(
         frames[clips[:-1]], frames[clips[1:]], transforms)
     list_of_flows = model(current_frames.to(device), next_frames.to(device))
@@ -94,10 +141,10 @@ def sample_trajectories(frames, device):
         for idx in range(len(useful_traj)):
             if useful_traj[idx][-1] == (-1, -1, -1):
                 useful_traj[idx] = useful_traj[idx][:-1]
-        print("how many points in all trajectories for resolution{}?".format(
-            resolution), sum([len(i) for i in useful_traj]))
-        print("how many points in the video for resolution{}?".format(
-            resolution), T*H*W)
+        # print("how many points in all trajectories for resolution{}?".format(
+        #     resolution), sum([len(i) for i in useful_traj]))
+        # print("how many points in the video for resolution{}?".format(
+        #     resolution), T*H*W)
 
         # validate if there are no duplicates in the trajectories
         trajs = []
@@ -110,12 +157,12 @@ def sample_trajectories(frames, device):
         all_points = set([(t, x, y) for t in range(T)
                          for x in range(H) for y in range(W)])
         left_points = all_points - set(trajs)
-        print("How many points not in the trajectories for resolution{}?".format(
-            resolution), len(left_points))
+        # print("How many points not in the trajectories for resolution{}?".format(
+        #     resolution), len(left_points))
         for p in list(left_points):
             useful_traj.append([p])
-        print("how many points in all trajectories for resolution{} after pending?".format(
-            resolution), sum([len(i) for i in useful_traj]))
+        # print("how many points in all trajectories for resolution{} after pending?".format(
+        #     resolution), sum([len(i) for i in useful_traj]))
 
         longest_length = max([len(i) for i in useful_traj])
         sequence_length = (

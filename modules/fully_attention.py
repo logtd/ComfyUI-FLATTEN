@@ -1,4 +1,5 @@
 # Adapted from https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/attention.py
+from comfy.ldm.modules.attention import optimized_attention, optimized_attention_masked, attention_basic
 import torch
 import torch.nn
 import torch.nn.functional as F
@@ -52,7 +53,6 @@ class FullyFrameAttention(nn.Module):
         operations=ops,  # is ops in original CrossAttention module
         # Flatten params
         bias=False,
-        added_kv_proj_dim: Optional[int] = None,
         norm_num_groups: Optional[int] = None,
     ):
         super().__init__()
@@ -69,8 +69,7 @@ class FullyFrameAttention(nn.Module):
         # You can set slice_size with `set_attention_slice`
         self.sliceable_head_dim = heads
         self._slice_size = None
-        self._use_memory_efficient_attention_xformers = False
-        self.added_kv_proj_dim = added_kv_proj_dim
+        self._use_memory_efficient_attention_xformers = True
 
         if norm_num_groups is not None:
             self.group_norm = nn.GroupNorm(
@@ -78,16 +77,16 @@ class FullyFrameAttention(nn.Module):
         else:
             self.group_norm = None
 
-        self.to_q = operations.Linear(query_dim, inner_dim, bias=bias)
-        self.to_k = operations.Linear(context_dim, inner_dim, bias=bias)
-        self.to_v = operations.Linear(context_dim, inner_dim, bias=bias)
-
-        if self.added_kv_proj_dim is not None:
-            self.add_k_proj = nn.Linear(added_kv_proj_dim, context_dim)
-            self.add_v_proj = nn.Linear(added_kv_proj_dim, context_dim)
+        self.to_q = operations.Linear(
+            query_dim, inner_dim, bias=bias, dtype=dtype, device=device)
+        self.to_k = operations.Linear(
+            context_dim, inner_dim, bias=bias, dtype=dtype, device=device)
+        self.to_v = operations.Linear(
+            context_dim, inner_dim, bias=bias, dtype=dtype, device=device)
 
         self.to_out = nn.ModuleList([])
-        self.to_out.append(operations.Linear(inner_dim, query_dim))
+        self.to_out.append(operations.Linear(
+            inner_dim, query_dim, dtype=dtype, device=device))
         self.to_out.append(nn.Dropout(dropout))
 
         self.q = None
@@ -129,10 +128,32 @@ class FullyFrameAttention(nn.Module):
             batch_size // head_size, seq_len, dim * head_size)
         return tensor
 
-    def forward(self, hidden_states, context=None, value=None, mask=None, video_length=None, inter_frame=False, **kwargs):
-        batch_size, sequence_length, _ = hidden_states.shape
+    def _memory_efficient_attention_xformers(self, query, key, value, attention_mask):
+        # TODO attention_mask
+        query = query.contiguous()
+        key = key.contiguous()
+        value = value.contiguous()
+        hidden_states = xformers.ops.memory_efficient_attention(
+            query, key, value, attn_bias=attention_mask)
+        hidden_states = self.reshape_batch_dim_to_heads(hidden_states)
+        return hidden_states
 
-        context = context
+    def _other_attention(self, query, key, value, attention_mask):
+        # TODO attention_mask
+        query = query.contiguous()
+        key = key.contiguous()
+        value = value.contiguous()
+        if attention_mask is not None:
+            hidden_states = optimized_attention_masked(
+                query, key, value, attention_mask)
+        else:
+            hidden_states = optimized_attention(
+                query, key, value, attention_mask)
+        hidden_states = self.reshape_batch_dim_to_heads(hidden_states)
+        return hidden_states
+
+    def forward(self, hidden_states, context=None, value=None, attention_mask=None, video_length=None, inter_frame=False, trajs_dict=None):
+        batch_size, sequence_length, _ = hidden_states.shape
 
         h = w = int(math.sqrt(sequence_length))
         if self.group_norm is not None:
@@ -143,16 +164,12 @@ class FullyFrameAttention(nn.Module):
         self.q = query
         if self.inject_q is not None:
             query = self.inject_q
-        dim = query.shape[-1]
         query_old = query.clone()
 
         # All frames
         query = rearrange(query, "(b f) d c -> b (f d) c", f=video_length)
 
         query = self.reshape_heads_to_batch_dim(query)
-
-        if self.added_kv_proj_dim is not None:
-            raise NotImplementedError
 
         context = context if context is not None else hidden_states
         key = self.to_k(context)
@@ -177,24 +194,23 @@ class FullyFrameAttention(nn.Module):
         key = self.reshape_heads_to_batch_dim(key)
         value = self.reshape_heads_to_batch_dim(value)
 
-        if mask is not None:
-            if mask.shape[-1] != query.shape[1]:
+        if attention_mask is not None:
+            if attention_mask.shape[-1] != query.shape[1]:
                 target_length = query.shape[1]
-                mask = F.pad(mask, (0, target_length), value=0.0)
-                mask = mask.repeat_interleave(self.heads, dim=0)
+                attention_mask = F.pad(
+                    attention_mask, (0, target_length), value=0.0)
+                attention_mask = attention_mask.repeat_interleave(
+                    self.heads, dim=0)
 
         # attention, what we cannot get enough of
         if self._use_memory_efficient_attention_xformers:
             hidden_states = self._memory_efficient_attention_xformers(
-                query, key, value, mask)
+                query, key, value, attention_mask)
             # Some versions of xformers return output in fp32, cast it back to the dtype of the input
             hidden_states = hidden_states.to(query.dtype)
         else:
-            if self._slice_size is None or query.shape[0] // self._slice_size == 1:
-                hidden_states = self._attention(query, key, value, mask)
-            else:
-                hidden_states = self._sliced_attention(
-                    query, key, value, sequence_length, dim, mask)
+            hidden_states = self._other_attention(
+                query, key, value, attention_mask)
 
         if h in [64]:
             hidden_states = rearrange(
@@ -203,7 +219,7 @@ class FullyFrameAttention(nn.Module):
                 hidden_states = self.group_norm(
                     hidden_states.transpose(1, 2)).transpose(1, 2)
 
-            if kwargs["old_qk"] == 1:
+            if trajs_dict['old_qk'] == 1:
                 query = query_old
                 key = key_old
             else:
@@ -211,16 +227,18 @@ class FullyFrameAttention(nn.Module):
                 key = hidden_states
             value = hidden_states
 
-            traj = kwargs["traj"]
-            traj = rearrange(traj, '(f n) l d -> f n l d',
-                             f=video_length, n=sequence_length)
-            mask = rearrange(
-                kwargs["mask"], '(f n) l -> f n l', f=video_length, n=sequence_length)
-            mask = torch.cat([mask[:, :, 0].unsqueeze(-1),
-                             mask[:, :, -video_length+1:]], dim=-1)
+            trajs = trajs_dict['traj']
+            traj_mask = trajs_dict['traj_mask']
+
+            trajs = rearrange(trajs, '(f n) l d -> f n l d',
+                              f=video_length, n=sequence_length)
+            traj_mask = rearrange(
+                traj_mask, '(f n) l -> f n l', f=video_length, n=sequence_length)
+            traj_mask = torch.cat([traj_mask[:, :, 0].unsqueeze(-1),
+                                   traj_mask[:, :, -video_length+1:]], dim=-1)
 
             traj_key_sequence_inds = torch.cat(
-                [traj[:, :, 0, :].unsqueeze(-2), traj[:, :, -video_length+1:, :]], dim=-2)
+                [trajs[:, :, 0, :].unsqueeze(-2), trajs[:, :, -video_length+1:, :]], dim=-2)
             t_inds = traj_key_sequence_inds[:, :, :, 0]
             x_inds = traj_key_sequence_inds[:, :, :, 1]
             y_inds = traj_key_sequence_inds[:, :, :, 2]
@@ -235,12 +253,13 @@ class FullyFrameAttention(nn.Module):
             key_tempo = rearrange(key_tempo, 'b f n l d -> (b f) n l d')
             value_tempo = rearrange(value_tempo, 'b f n l d -> (b f) n l d')
 
-            mask = rearrange(torch.stack(
-                [mask, mask]),  'b f n l -> (b f) n l')
-            mask = mask[:, None].repeat(1, self.heads, 1, 1).unsqueeze(-2)
+            traj_mask = rearrange(torch.stack(
+                [traj_mask, traj_mask]),  'b f n l -> (b f) n l')
+            traj_mask = traj_mask[:, None].repeat(
+                1, self.heads, 1, 1).unsqueeze(-2)
             attn_bias = torch.zeros_like(
-                mask, dtype=key_tempo.dtype)  # regular zeros_like
-            attn_bias[~mask] = -torch.inf
+                traj_mask, dtype=key_tempo.dtype, device=query.device)  # regular zeros_like
+            attn_bias[~traj_mask] = -torch.inf
 
             # flow attention
             query_tempo = self.reshape_heads_to_batch_dim3(query_tempo)
