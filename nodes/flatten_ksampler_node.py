@@ -33,9 +33,13 @@ class KSamplerFlattenNode:
 
     def sample(self, model, add_noise, noise_seed, steps, injection_steps, old_qk, trajectories, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0):
         # PREPARTION
+        injections = latent_image["injections"]
+        for key in injections:
+            injections[key] = list(reversed(injections[key]))
+
         latent = latent_image
         latent_image = latent["samples"]
-        injections = latent["injections"]
+        latent_image = rearrange(latent_image, "(b f) c h w -> b c f h w", b=1)
         transformer_options = {
             'flatten': {
                 'trajs': trajectories,
@@ -83,20 +87,63 @@ class KSamplerFlattenNode:
 
         pbar = comfy.utils.ProgressBar(steps)
 
-        def callback(step, x0, x, total_steps):
-            pbar.update_absolute(step +
-                                 1, steps)
+        callback_idx = 0
 
-        for i in range(len(sigmas)):
-            if i < injection_steps:
-                continue  # DO INJECTION HERE
-            samples = sampler.sample(noise, positive, negative, cfg=cfg, latent_image=latent_image, force_full_denoise=False,
-                                     denoise_mask=noise_mask, sigmas=[sigmas[i], sigmas[i+1]], start_step=0, last_step=end_at_step, callback=callback)
+        def callback(step, x0, x, total_steps):
+            self._clear_injections(model)
+            if step + 1 < injection_steps:
+                self._inject(model, injections, device, step + 1)
+            pbar.update_absolute(step + 1, total_steps)
+
+        self._clear_injections(model)
+        if start_at_step < injection_steps:
+            self._inject(model, injections, device, start_at_step)
+
+        samples = sampler.sample(noise, positive, negative, cfg=cfg, latent_image=latent_image, force_full_denoise=False,
+                                 denoise_mask=noise_mask, sigmas=sigmas, start_step=start_at_step, last_step=end_at_step, callback=callback)
+        self._clear_injections(model)
         samples = samples.cpu()
 
         comfy.sample.cleanup_additional_models(models)
 
         out = latent.copy()
-        out["samples"] = samples
+        out["samples"] = rearrange(samples, 'b c f h w -> (b f) c h w')
 
         return (out, )
+
+    def _clear_injections(self, model):
+        model = model.model.diffusion_model
+        res_attn_dict = {1: [0, 1], 2: [0]}
+        for res in res_attn_dict:
+            for block in res_attn_dict[res]:
+                model.output_blocks[3*res+block][0].out_layers_features = None
+        attn_res_dict = {1: [1, 2], 2: [0, 1, 2], 3: [0]}
+        for attn in attn_res_dict:
+            for block in attn_res_dict[attn]:
+                module = model.output_blocks[3*attn +
+                                             block][1].transformer_blocks[0].attn1
+                module.q = None
+                module.k = None
+                module.inject_q = None
+                module.inject_k = None
+
+    def _inject(self, model, injection, device, step):
+        model = model.model.diffusion_model
+
+        res_dict = {1: [0, 1], 2: [0]}
+        res_idx = 0
+        for res in res_dict:
+            for block in res_dict[res]:
+                model.output_blocks[3*res +
+                                    block][0].out_layers_features = injection[f'features{res_idx}'][step].to(device)
+                res_idx += 1
+
+        attn_dict = {1: [1, 2], 2: [0, 1, 2], 3: [0]}
+        attn_idx = 4
+        for attn in attn_dict:
+            for block in attn_dict[attn]:
+                module = model.output_blocks[3*attn +
+                                             block][1].transformer_blocks[0].attn1
+                module.inject_q = injection[f'q{attn_idx}'][step].to(device)
+                module.inject_k = injection[f'k{attn_idx}'][step].to(device)
+                attn_idx += 1

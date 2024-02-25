@@ -23,12 +23,12 @@ class Upsample3D(nn.Module):
         self.use_conv = use_conv
         self.dims = dims
 
-        conv = None
+        # conv = None
         if use_conv:
             self.conv = InflatedConv3d(
                 self.channels, self.out_channels, 3, padding=padding).half()
 
-            self.Conv2d_0 = conv
+            # self.Conv2d_0 = conv
 
     def forward(self, hidden_states, output_shape=None):
         assert hidden_states.shape[1] == self.channels
@@ -42,26 +42,16 @@ class Upsample3D(nn.Module):
         if hidden_states.shape[0] >= 64:
             hidden_states = hidden_states.contiguous()
 
-        # if `output_size` is passed we force the interpolation output
+        # if `output_shape` is passed we force the interpolation output
         # size and do not make use of `scale_factor=2`
-        shape = None
-        if self.dims == 3:
-            shape = [hidden_states.shape[2], hidden_states.shape[3]
-                     * 2, hidden_states.shape[4] * 2]
-            if output_shape is not None:
-                shape[1] = output_shape[3]
-                shape[2] = output_shape[4]
-        else:
-            shape = [hidden_states.shape[2] * 2, hidden_states.shape[3] * 2]
-            if output_shape is not None:
-                shape[0] = output_shape[2]
-                shape[1] = output_shape[3]
-        if shape is None:
+        # if `output_shape` is passed we force the interpolation output
+        # size and do not make use of `scale_factor=2`
+        if output_shape is None:
             hidden_states = F.interpolate(hidden_states, scale_factor=[
                                           1.0, 2.0, 2.0], mode="nearest")
         else:
             hidden_states = F.interpolate(
-                hidden_states, size=shape, mode="nearest")
+                hidden_states, size=output_shape, mode="nearest")
 
         # If the input is bfloat16, we cast back to bfloat16
         if dtype == torch.bfloat16:

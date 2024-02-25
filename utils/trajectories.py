@@ -70,6 +70,7 @@ def sample_trajectories(frames, device):
                        progress=False).to(device)
     model = model.eval()
     # TODO should this be "f w h c -> f c h w"?
+    # frames = rearrange(frames,  "f h w c -> f c h w")
     frames = rearrange(frames,  "f h w c -> f c h w")
     current_frames, next_frames = preprocess(
         frames[clips[:-1]], frames[clips[1:]], transforms)
@@ -86,7 +87,6 @@ def sample_trajectories(frames, device):
                     8: 1}
 
     for resolution in resolutions:
-        print("="*30)
         trajectories = {}
         predicted_flow_resolu = torch.round(resolution*torch.nn.functional.interpolate(
             predicted_flows, scale_factor=(resolution/512, resolution/512)))

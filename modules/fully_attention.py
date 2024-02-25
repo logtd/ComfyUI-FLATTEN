@@ -93,6 +93,7 @@ class FullyFrameAttention(nn.Module):
         self.inject_q = None
         self.k = None
         self.inject_k = None
+        # self.conds = 1
 
     def reshape_heads_to_batch_dim(self, tensor):
         batch_size, seq_len, dim = tensor.shape
@@ -129,7 +130,6 @@ class FullyFrameAttention(nn.Module):
         return tensor
 
     def _memory_efficient_attention_xformers(self, query, key, value, attention_mask):
-        # TODO attention_mask
         query = query.contiguous()
         key = key.contiguous()
         value = value.contiguous()
@@ -139,7 +139,6 @@ class FullyFrameAttention(nn.Module):
         return hidden_states
 
     def _other_attention(self, query, key, value, attention_mask):
-        # TODO attention_mask
         query = query.contiguous()
         key = key.contiguous()
         value = value.contiguous()
@@ -229,6 +228,7 @@ class FullyFrameAttention(nn.Module):
 
             trajs = trajs_dict['traj']
             traj_mask = trajs_dict['traj_mask']
+            cond_size = trajs_dict['cond_size']
 
             trajs = rearrange(trajs, '(f n) l d -> f n l d',
                               f=video_length, n=sequence_length)
@@ -254,7 +254,7 @@ class FullyFrameAttention(nn.Module):
             value_tempo = rearrange(value_tempo, 'b f n l d -> (b f) n l d')
 
             traj_mask = rearrange(torch.stack(
-                [traj_mask, traj_mask]),  'b f n l -> (b f) n l')
+                [traj_mask] * cond_size),  'b f n l -> (b f) n l')
             traj_mask = traj_mask[:, None].repeat(
                 1, self.heads, 1, 1).unsqueeze(-2)
             attn_bias = torch.zeros_like(

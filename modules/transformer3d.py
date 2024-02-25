@@ -65,6 +65,7 @@ class Transformer3DModel(nn.Module):
         if 'flatten' in transformer_options and 'inter_frame' in transformer_options["flatten"]:
             inter_frame = transformer_options["flatten"]['inter_frame']
         video_length = hidden_states.shape[2]
+        cond_size = hidden_states.shape[0]
         hidden_states = rearrange(hidden_states, "b c f h w -> (b f) c h w")
         context = repeat(
             context, 'b n c -> (b f) n c', f=video_length)
@@ -81,6 +82,7 @@ class Transformer3DModel(nn.Module):
             resolu)]
         # trajs["t"] = transformer_options["flatten"]["t"]
         trajs_dict["old_qk"] = transformer_options["flatten"]["old_qk"]
+        trajs_dict["cond_size"] = cond_size
 
         hidden_states = self.norm(hidden_states)
         if not self.use_linear:

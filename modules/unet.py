@@ -425,6 +425,8 @@ class UNetModel(nn.Module):
                         if resblock_updown
                         else Upsample3D(ch, conv_resample, dims=dims, out_channels=out_ch, dtype=self.dtype, device=device, operations=operations)
                     )
+                    if not resblock_updown:
+                        self.num_upsamplers += 1
                     ds //= 2
                 self.output_blocks.append(TimestepEmbedSequential(*layers))
                 self._feature_size += ch
@@ -452,6 +454,14 @@ class UNetModel(nn.Module):
         :param y: an [N] Tensor of labels, if class-conditional.
         :return: an [N x C x ...] Tensor of outputs.
         """
+        default_overall_up_factor = 2**self.num_upsamplers
+        forward_upsample_size = False
+        upsample_size = None
+
+        if any(s % default_overall_up_factor != 0 for s in x.shape[-2:]):
+            print('Upsampling True')
+            forward_upsample_size = True
+
         transformer_options["original_shape"] = list(x.shape)
         transformer_options["transformer_index"] = 0
         transformer_patches = transformer_options.get("patches", {})
@@ -508,10 +518,11 @@ class UNetModel(nn.Module):
 
             h = th.cat([h, hsp], dim=1)
             del hsp
-            if len(hs) > 0:
-                output_shape = hs[-1].shape
+            if len(hs) > 0 and forward_upsample_size:
+                output_shape = hs[-1].shape[2:]
             else:
                 output_shape = None
+            # TODO UPSAMPLE SHAPE -- done
             h = forward_timestep_embed(module, h, emb, context, transformer_options, output_shape,
                                        time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
         h = h.type(x.dtype)
