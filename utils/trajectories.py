@@ -76,9 +76,13 @@ def sample_trajectories(frames, device):
     predicted_flows = predicted_flows/512
 
     # TODO make resolution configurable
-    resolutions = [64]
+    # All these are needed with 512x512 due to upsample/downsample
+    resolutions = [64, 32, 16, 8]
     res = {}
-    window_sizes = {64: 2}
+    window_sizes = {64: 2,
+                    32: 1,
+                    16: 1,
+                    8: 1}
 
     for resolution in resolutions:
         trajectories = {}

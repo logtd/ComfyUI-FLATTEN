@@ -1,3 +1,4 @@
+import torch
 from einops import rearrange
 import comfy.sd
 import comfy.model_base
@@ -30,12 +31,27 @@ class FlattenCheckpointLoaderNode:
         comfy.model_base.BaseModel = original_base
 
         def model_function_wrapper(apply_model_func, apply_params):
-            len_conds = len(apply_params['cond_or_uncond'])
             input_x = apply_params['input']
+            len_conds = len(apply_params['cond_or_uncond'])
+            frame_count = input_x.shape[0] // len_conds
             input_x = rearrange(
                 input_x, "(b f) c h w -> b c f h w", b=len_conds)
             timestep_ = apply_params['timestep']
-            model_out = apply_model_func(input_x, timestep_, **apply_params)
+            timestep_ = timestep_[torch.arange(
+                0, timestep_.size(0), frame_count)]
+            del apply_params['timestep']
+            conditioning = {}
+            for key in apply_params['c']:
+                value = apply_params['c'][key]
+                if key == 'c_crossattn':
+                    value = value[torch.arange(0, value.size(0), frame_count)]
+
+                conditioning[key] = value
+
+            conditioning
+            del apply_params['c']
+            del apply_params['input']
+            model_out = apply_model_func(input_x, timestep_, **conditioning)
             model_out = rearrange(model_out, 'b c f h w -> (b f) c h w')
             return model_out
 

@@ -96,7 +96,6 @@ class UnsamplerFlattenNode:
         samples = samples.cpu()
 
         comfy.sample.cleanup_additional_models(models)
-        samples = rearrange(samples, 'b c f h w -> (b f) c h w')
 
         return ({'samples': samples, 'injections': injection_dict},)
 

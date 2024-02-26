@@ -1,3 +1,4 @@
+from einops import rearrange
 from .resnet_block3d import ResnetBlock3D
 from .downsample3d import Downsample3D
 from .upsample3d import Upsample3D
@@ -13,9 +14,17 @@ from comfy.ldm.modules.diffusionmodules.util import (
     timestep_embedding,
 )
 from comfy.ldm.util import exists
-from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepBlock, apply_control
+from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepBlock, apply_control as apply_control_2d
 import comfy.ops
 ops = comfy.ops.disable_weight_init
+
+
+def apply_control(hsp, control, block_type):
+    b = hsp.shape[0]
+    hsp = rearrange(hsp, 'b c f h w -> (b f) c h w')
+    hsp = apply_control_2d(hsp, control, block_type)
+    hsp = rearrange(hsp, '(b f) c h w -> b c f h w', b=b)
+    return hsp
 
 
 def forward_timestep_embed(ts, x, emb, context=None, transformer_options={}, output_shape=None, time_context=None, num_video_frames=None, image_only_indicator=None):

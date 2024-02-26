@@ -111,7 +111,7 @@ class KSamplerFlattenNode:
 
         comfy.sample.cleanup_additional_models(models)
 
-        out = latent.copy()
+        out = {}
         out["samples"] = samples
 
         return (out, )
