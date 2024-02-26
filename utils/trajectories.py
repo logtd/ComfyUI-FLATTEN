@@ -59,8 +59,6 @@ def neighbors_index(point, window_size, H, W):
 
 @torch.no_grad()
 def sample_trajectories(frames, device):
-    # video = rearrange(video, "f h w c -> f c h w")
-    # video = (video / 127.5 - 1.0)
     weights = Raft_Large_Weights.DEFAULT
     transforms = weights.transforms()
 
@@ -69,8 +67,6 @@ def sample_trajectories(frames, device):
     model = raft_large(weights=Raft_Large_Weights.DEFAULT,
                        progress=False).to(device)
     model = model.eval()
-    # TODO should this be "f w h c -> f c h w"?
-    # frames = rearrange(frames,  "f h w c -> f c h w")
     frames = rearrange(frames,  "f h w c -> f c h w")
     current_frames, next_frames = preprocess(
         frames[clips[:-1]], frames[clips[1:]], transforms)
@@ -79,12 +75,10 @@ def sample_trajectories(frames, device):
 
     predicted_flows = predicted_flows/512
 
-    resolutions = [64, 32, 16, 8]
+    # TODO make resolution configurable
+    resolutions = [64]
     res = {}
-    window_sizes = {64: 2,
-                    32: 1,
-                    16: 1,
-                    8: 1}
+    window_sizes = {64: 2}
 
     for resolution in resolutions:
         trajectories = {}
@@ -141,28 +135,17 @@ def sample_trajectories(frames, device):
         for idx in range(len(useful_traj)):
             if useful_traj[idx][-1] == (-1, -1, -1):
                 useful_traj[idx] = useful_traj[idx][:-1]
-        # print("how many points in all trajectories for resolution{}?".format(
-        #     resolution), sum([len(i) for i in useful_traj]))
-        # print("how many points in the video for resolution{}?".format(
-        #     resolution), T*H*W)
-
-        # validate if there are no duplicates in the trajectories
         trajs = []
         for traj in useful_traj:
             trajs = trajs + traj
         assert len(find_duplicates(
             trajs)) == 0, "There should not be duplicates in the useful trajectories."
 
-        # check if non-appearing points + appearing points = all the points in the video
         all_points = set([(t, x, y) for t in range(T)
                          for x in range(H) for y in range(W)])
         left_points = all_points - set(trajs)
-        # print("How many points not in the trajectories for resolution{}?".format(
-        #     resolution), len(left_points))
         for p in list(left_points):
             useful_traj.append([p])
-        # print("how many points in all trajectories for resolution{} after pending?".format(
-        #     resolution), sum([len(i) for i in useful_traj]))
 
         longest_length = max([len(i) for i in useful_traj])
         sequence_length = (
