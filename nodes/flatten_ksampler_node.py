@@ -39,8 +39,13 @@ class KSamplerFlattenNode:
 
         latent = latent_image
         latent_image = latent["samples"]
-        latent_image = rearrange(latent_image, "(b f) c h w -> b c f h w", b=1)
+        # latent_image = rearrange(latent_image, "(b f) c h w -> b c f h w", b=1)
+        transformer_options = {}
+        if 'transformer_options' in model.model_options:
+            transformer_options = model.model_options['transformer_options']
+
         transformer_options = {
+            **transformer_options,
             'flatten': {
                 'trajs': trajectories,
                 'old_qk': old_qk
@@ -107,7 +112,7 @@ class KSamplerFlattenNode:
         comfy.sample.cleanup_additional_models(models)
 
         out = latent.copy()
-        out["samples"] = rearrange(samples, 'b c f h w -> (b f) c h w')
+        out["samples"] = samples
 
         return (out, )
 
