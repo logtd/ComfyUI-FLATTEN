@@ -31,3 +31,4 @@ TODO
 ## Acknowledgements
 * [Cong, Yuren and Xu, Mengmeng and Simon, Christian and Chen, Shoufa and Ren, Jiawei and Xie, Yanping and Perez-Rua, Juan-Manuel and Rosenhahn, Bodo and Xiang, Tao and He, Sen](https://github.com/yrcong/flatten) for their research on FLATTEN, producing the original repo, and contributing to open source.
 * [Kosinkadink](https://github.com/Kosinkadink) for creating Video Helper Suite
+* [Kijai](https://github.com/kijai) for testing and his node suites
