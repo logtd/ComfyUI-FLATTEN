@@ -112,6 +112,45 @@ class BasicTransformerBlock(nn.Module):
             inter_frame=False,  # VALIDATE that this gets sent to the block via transformer_options
             trajs_dict=None
     ):
+        hidden_states = x
+        encoder_hidden_states = context
+        norm_hidden_states = self.norm1(hidden_states)
+
+        if self.only_cross_attention:
+            hidden_states = (
+                self.attn1(norm_hidden_states, encoder_hidden_states, attention_mask=attention_mask,
+                           inter_frame=inter_frame, trajs_dict=trajs_dict) + hidden_states
+            )
+        else:
+            hidden_states = self.attn1(norm_hidden_states, attention_mask=attention_mask,
+                                       video_length=video_length, inter_frame=inter_frame, trajs_dict=trajs_dict) + hidden_states
+
+        if self.attn2 is not None:
+            # Cross-Attention
+            norm_hidden_states = self.norm2(hidden_states)
+
+            hidden_states = (
+                self.attn2(
+                    norm_hidden_states, context=encoder_hidden_states, mask=attention_mask
+                )
+                + hidden_states
+            )
+
+        # Feed-forward
+        hidden_states = self.ff(self.norm3(hidden_states)) + hidden_states
+
+        return hidden_states
+
+    def _forward(
+            self,
+            x,
+            context=None,
+            transformer_options={},
+            attention_mask=None,  # VALIDATE that this gets sent to the block via transformer_options
+            video_length=None,  # VALIDATE that this gets sent to the block via transformer_options
+            inter_frame=False,  # VALIDATE that this gets sent to the block via transformer_options
+            trajs_dict=None
+    ):
         # Comfy setup
         extra_options = {}
         block = transformer_options.get("block", None)
@@ -197,7 +236,7 @@ class BasicTransformerBlock(nn.Module):
         # can add GatedSelfAttentionDense here -- like Gligen
         if self.attn2 is not None:
             # 3 -- norm2
-            n = self.norm2(x)
+            n = self.norm2(n)
             if self.switch_temporal_ca_to_sa:
                 context_attn2 = n
             else:
@@ -233,13 +272,14 @@ class BasicTransformerBlock(nn.Module):
             for p in patch:
                 n = p(n, extra_options)
 
-        x += n
-        if self.is_res:
-            x_skip = x
+        # x += n
+        # if self.is_res:
+        #     x_skip = x
 
-        # 5 -- norm3/ff
-        x = self.ff(self.norm3(x))
-        if self.is_res:
-            x += x_skip
+        # # 5 -- norm3/ff
+        # x = self.ff(self.norm3(x))
+        # if self.is_res:
+        #     x += x_skip
+        n = self.ff(self.norm3(n)) + n
 
-        return x
+        return n

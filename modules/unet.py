@@ -198,8 +198,6 @@ class UNetModel(nn.Module):
         self.input_blocks = nn.ModuleList(
             [
                 TimestepEmbedSequential(
-                    # operations.conv_nd(  # TODO
-                    #     dims, in_channels, model_channels, 3, padding=1, dtype=self.dtype, device=device)
                     InflatedConv3d(
                         in_channels, model_channels, kernel_size=3, padding=(1, 1))
                 ).half()
@@ -364,7 +362,7 @@ class UNetModel(nn.Module):
         self.middle_block = TimestepEmbedSequential(*mid_block)
         self._feature_size += ch
 
-        self.num_upsamplers = 0  # TODO
+        self.num_upsamplers = 0
         self.output_blocks = nn.ModuleList([])
         for level, mult in list(enumerate(channel_mult))[::-1]:
             for i in range(self.num_res_blocks[level] + 1):
@@ -522,7 +520,7 @@ class UNetModel(nn.Module):
                 output_shape = hs[-1].shape[2:]
             else:
                 output_shape = None
-            # TODO UPSAMPLE SHAPE -- done
+
             h = forward_timestep_embed(module, h, emb, context, transformer_options, output_shape,
                                        time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
         h = h.type(x.dtype)

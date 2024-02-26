@@ -219,14 +219,19 @@ class Unsampler2:
                                           scheduler=scheduler, denoise=1.0, model_options=model.model_options)
 
         sigmas = sigmas = sampler.sigmas.flip(0) + 0.0001
-
+        injection_dict = self._get_blank_injection_dict()
         pbar = comfy.utils.ProgressBar(steps)
 
         def callback(step, x0, x, total_steps):
             pbar.update_absolute(step + 1, total_steps)
+            self._update_injections(model, injection_dict)
+
+        self._clear_injections(model)
 
         samples = sampler.sample(noise, positive, negative, cfg=cfg, latent_image=latent_image, force_full_denoise=False,
                                  denoise_mask=noise_mask, sigmas=sigmas, start_step=0, last_step=end_at_step, callback=callback)
+
+        self._clear_injections(model)
         if normalize:
             # technically doesn't normalize because unsampling is not guaranteed to end at a std given by the schedule
             samples -= samples.mean()
@@ -236,4 +241,60 @@ class Unsampler2:
         comfy.sample.cleanup_additional_models(models)
         samples = rearrange(samples, 'b c f h w -> (b f) c h w')
 
-        return ({'samples': samples, 'injections': None},)
+        return ({'samples': samples, 'injections': injection_dict},)
+
+    def _get_blank_injection_dict(self):
+        return {
+            'features0': [],
+            'features1': [],
+            'features2': [],
+            'q4': [],
+            'k4': [],
+            'q5': [],
+            'k5': [],
+            'q6': [],
+            'k6': [],
+            'q7': [],
+            'k7': [],
+            'q8': [],
+            'k8': [],
+            'q9': [],
+            'k9': []
+        }
+
+    def _clear_injections(self, model):
+        model = model.model.diffusion_model
+        res_attn_dict = {1: [0, 1], 2: [0]}
+        for res in res_attn_dict:
+            for block in res_attn_dict[res]:
+                model.output_blocks[3*res+block][0].out_layers_features = None
+        attn_res_dict = {1: [1, 2], 2: [0, 1, 2], 3: [0]}
+        for attn in attn_res_dict:
+            for block in attn_res_dict[attn]:
+                module = model.output_blocks[3*attn +
+                                             block][1].transformer_blocks[0].attn1
+                module.q = None
+                module.k = None
+                module.inject_q = None
+                module.inject_k = None
+
+    def _update_injections(self, model, injection):
+        model = model.model.diffusion_model
+
+        res_dict = {1: [0, 1], 2: [0]}
+        res_idx = 0
+        for res in res_dict:
+            for block in res_dict[res]:
+                injection[f'features{res_idx}'].append(
+                    model.output_blocks[3*res+block][0].out_layers_features.cpu())
+                res_idx += 1
+
+        attn_dict = {1: [1, 2], 2: [0, 1, 2], 3: [0]}
+        attn_idx = 4
+        for attn in attn_dict:
+            for block in attn_dict[attn]:
+                module = model.output_blocks[3*attn +
+                                             block][1].transformer_blocks[0].attn1
+                injection[f'q{attn_idx}'].append(module.q.cpu())
+                injection[f'k{attn_idx}'].append(module.k.cpu())
+                attn_idx += 1
