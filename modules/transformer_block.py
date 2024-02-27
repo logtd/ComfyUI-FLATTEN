@@ -1,5 +1,6 @@
 from einops import rearrange, repeat
 from .fully_attention import FullyFrameAttention
+from .patch3d import apply_patch3d
 from comfy.ldm.modules.attention import FeedForward, CrossAttention
 import torch
 import torch.nn as nn
@@ -112,6 +113,24 @@ class BasicTransformerBlock(nn.Module):
             inter_frame=False,  # VALIDATE that this gets sent to the block via transformer_options
             trajs_dict=None
     ):
+        # Comfy setup
+        extra_options = {}
+        block = transformer_options.get("block", None)
+        block_index = transformer_options.get("block_index", 0)
+        transformer_patches = {}
+        transformer_patches_replace = {}
+
+        for k in transformer_options:
+            if k == "patches":
+                transformer_patches = transformer_options[k]
+            elif k == "patches_replace":
+                transformer_patches_replace = transformer_options[k]
+            else:
+                extra_options[k] = transformer_options[k]
+
+        extra_options["n_heads"] = self.n_heads
+        extra_options["dim_head"] = self.d_head
+
         hidden_states = x
         encoder_hidden_states = context
         norm_hidden_states = self.norm1(hidden_states)
@@ -124,6 +143,11 @@ class BasicTransformerBlock(nn.Module):
         else:
             hidden_states = self.attn1(norm_hidden_states, attention_mask=attention_mask,
                                        video_length=video_length, inter_frame=inter_frame, trajs_dict=trajs_dict) + hidden_states
+
+        if "middle_patch" in transformer_patches:
+            patch = transformer_patches["middle_patch"]
+            for p in patch:
+                hidden_states = p(hidden_states, extra_options)
 
         if self.attn2 is not None:
             # Cross-Attention
@@ -233,7 +257,11 @@ class BasicTransformerBlock(nn.Module):
             for p in patch:
                 n = p(n, extra_options)
 
-        # can add GatedSelfAttentionDense here -- like Gligen
+        if "middle_patch" in transformer_patches:
+            patch = transformer_patches["middle_patch"]
+            for p in patch:
+                n = apply_patch3d(n, extra_options, patch)
+
         if self.attn2 is not None:
             # 3 -- norm2
             n = self.norm2(n)

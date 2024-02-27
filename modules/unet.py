@@ -4,7 +4,7 @@ from .downsample3d import Downsample3D
 from .upsample3d import Upsample3D
 from .convs import InflatedConv3d
 from .transformer3d import Transformer3DModel
-
+from .patch3d import apply_unet_patch3d, apply_patch3d
 
 import torch as th
 import torch.nn as nn
@@ -500,13 +500,13 @@ class UNetModel(nn.Module):
             if "input_block_patch" in transformer_patches:
                 patch = transformer_patches["input_block_patch"]
                 for p in patch:
-                    h = p(h, transformer_options)
+                    h = apply_patch3d(h, transformer_options, p)
 
             hs.append(h)
             if "input_block_patch_after_skip" in transformer_patches:
                 patch = transformer_patches["input_block_patch_after_skip"]
                 for p in patch:
-                    h = p(h, transformer_options)
+                    h = apply_patch3d(h, transformer_options, p)
 
         transformer_options["block"] = ("middle", 0)
         h = forward_timestep_embed(self.middle_block, h, emb, context, transformer_options, time_context=time_context,
@@ -521,7 +521,7 @@ class UNetModel(nn.Module):
             if "output_block_patch" in transformer_patches:
                 patch = transformer_patches["output_block_patch"]
                 for p in patch:
-                    h, hsp = p(h, hsp, transformer_options)
+                    h, hsp = apply_unet_patch3d(h, hsp, transformer_options, p)
 
             h = th.cat([h, hsp], dim=1)
             del hsp

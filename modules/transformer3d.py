@@ -80,7 +80,6 @@ class Transformer3DModel(nn.Module):
             resolu)]
         trajs_dict["traj_mask"] = transformer_options["flatten"]["trajs"]["mask{}".format(
             resolu)]
-        # trajs["t"] = transformer_options["flatten"]["t"]
         trajs_dict["old_qk"] = transformer_options["flatten"]["old_qk"]
         trajs_dict["cond_size"] = cond_size
 
