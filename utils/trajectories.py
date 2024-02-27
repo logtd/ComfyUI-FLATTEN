@@ -77,9 +77,10 @@ def sample_trajectories(frames, device):
 
     # TODO make resolution configurable
     # All these are needed with 512x512 due to upsample/downsample
-    resolutions = [64, 32, 16, 8]
+    resolutions = [128, 64, 32, 16, 8]
     res = {}
-    window_sizes = {64: 2,
+    window_sizes = {128: 2,
+                    64: 2,
                     32: 1,
                     16: 1,
                     8: 1}

@@ -30,6 +30,7 @@ class UnsamplerFlattenNode:
         # PREPARTION
         latent = latent_image
         latent_image = latent["samples"]
+        original_shape = latent_image.shape
         # latent_image = rearrange(latent_image, "(b f) c h w -> b c f h w", b=1)
         transformer_options = {}
         if 'transformer_options' in model.model_options:
@@ -39,7 +40,8 @@ class UnsamplerFlattenNode:
             **transformer_options,
             'flatten': {
                 'trajs': trajectories,
-                'old_qk': old_qk
+                'old_qk': old_qk,
+                'original_shape': original_shape
             }
         }
         model.model_options['transformer_options'] = transformer_options

@@ -32,26 +32,13 @@ class KSamplerFlattenNode:
     CATEGORY = "sampling"
 
     def sample(self, model, add_noise, noise_seed, steps, injection_steps, old_qk, trajectories, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0):
-        # PREPARTION
+        device = comfy.model_management.get_torch_device()
+
         injections = latent_image["injections"]
 
         latent = latent_image
         latent_image = latent["samples"]
-
-        transformer_options = {}
-        if 'transformer_options' in model.model_options:
-            transformer_options = model.model_options['transformer_options']
-
-        transformer_options = {
-            **transformer_options,
-            'flatten': {
-                'trajs': trajectories,
-                'old_qk': old_qk
-            }
-        }
-        model.model_options['transformer_options'] = transformer_options
-
-        device = comfy.model_management.get_torch_device()
+        original_shape = latent_image.shape
 
         end_at_step = steps
 
@@ -85,27 +72,58 @@ class KSamplerFlattenNode:
                                           scheduler=scheduler, denoise=1.0, model_options=model.model_options)
 
         sigmas = sampler.sigmas
+        sigma_to_step = {}
+        for i, sigma in enumerate(sigmas):
+            sigma_to_step[sigma] = i
 
+        # FLATTEN TRANSFORMER OPTIONS
+        transformer_options = model.model_options.get(
+            'transformer_options', {})
+
+        def injection_handler(sigma, idxs):
+            if idxs is None:
+                idxs = list(range(original_shape[0]))
+            self._clear_injections(model)
+            step = sigma_to_step[sigma]
+            if step < injection_steps:
+                self._inject(model, injections, device, step, idxs)
+            else:
+                self._clear_injections(model)
+
+        transformer_options = {
+            **transformer_options,
+            'flatten': {
+                'trajs': trajectories,
+                'old_qk': old_qk,
+                'injection_handler': injection_handler,
+                'original_shape': original_shape
+            }
+        }
+        model.model_options['transformer_options'] = transformer_options
+
+        # SAMPLE MODEL
         pbar = comfy.utils.ProgressBar(steps)
 
         def callback(step, x0, x, total_steps):
-            self._clear_injections(model)
-            if step + 1 < injection_steps:
-                self._inject(model, injections, device, step + 1)
+            # self._clear_injections(model)
+            # if step + 1 < injection_steps:
+            #     self._inject(model, injections, device, step + 1)
             pbar.update_absolute(step + 1, total_steps)
 
         self._clear_injections(model)
-        if start_at_step < injection_steps:
-            self._inject(model, injections, device, start_at_step)
+        # if start_at_step < injection_steps:
+        #     self._inject(model, injections, device, start_at_step)
 
         samples = sampler.sample(noise, positive, negative, cfg=cfg, latent_image=latent_image, force_full_denoise=False,
                                  denoise_mask=noise_mask, sigmas=sigmas, start_step=start_at_step, last_step=end_at_step, callback=callback)
+
+        # RETURN SAMPLES
         self._clear_injections(model)
         samples = samples.cpu()
 
         comfy.sample.cleanup_additional_models(models)
 
-        out = {}
+        out = latent.copy()
         out["samples"] = samples
 
         return (out, )

@@ -31,6 +31,7 @@ class FlattenCheckpointLoaderNode:
         comfy.model_base.BaseModel = original_base
 
         def model_function_wrapper(apply_model_func, apply_params):
+            # Prepare 3D latent
             input_x = apply_params['input']
             len_conds = len(apply_params['cond_or_uncond'])
             frame_count = input_x.shape[0] // len_conds
@@ -39,6 +40,21 @@ class FlattenCheckpointLoaderNode:
             timestep_ = apply_params['timestep']
             timestep_ = timestep_[torch.arange(
                 0, timestep_.size(0), frame_count)]
+
+            # Do injection if needed
+            transformer_options = apply_params.get('transformer_options', {})
+            flatten_options = transformer_options.get('flatten', None)
+            if flatten_options is None:
+                raise Exception(
+                    'Error: flatten requires use of a Flatten sampler')
+
+            idxs = None
+            if 'ad_params' in transformer_options:
+                idxs = transformer_options['ad_params']['sub_idxs']
+
+            if flatten_options['injection_handler'] is not None:
+                flatten_options['injection_handler'](timestep_[0].item(), idxs)
+
             del apply_params['timestep']
             conditioning = {}
             for key in apply_params['c']:
@@ -52,6 +68,9 @@ class FlattenCheckpointLoaderNode:
             del apply_params['c']
             del apply_params['input']
             model_out = apply_model_func(input_x, timestep_, **conditioning)
+            # Clear injections
+
+            # Return 2D latent
             model_out = rearrange(model_out, 'b c f h w -> (b f) c h w')
             return model_out
 
