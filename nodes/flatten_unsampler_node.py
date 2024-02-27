@@ -12,9 +12,8 @@ class UnsamplerFlattenNode:
                  "end_at_step": ("INT", {"default": 0, "min": 0, "max": 10000}),
                  "sampler_name": (comfy.samplers.KSampler.SAMPLERS, ),
                  "scheduler": (comfy.samplers.KSampler.SCHEDULERS, ),
-                 "normalize": (["disable", "enable"], ),
+                 #  "normalize": (["disable", "enable"], ),
                  "positive": ("CONDITIONING", ),
-                 "negative": ("CONDITIONING", ),
                  "latent_image": ("LATENT", ),
                  "trajectories": ("TRAJECTORY", ),
                  "old_qk": ("INT", {"default": 0, "min": 0, "max": 1}),
@@ -25,8 +24,8 @@ class UnsamplerFlattenNode:
 
     CATEGORY = "sampling"
 
-    def unsampler(self, model, sampler_name, steps, end_at_step, scheduler, normalize, positive, negative, latent_image, trajectories, old_qk):
-        # Hardcoded to 1 to make attention injection logic simple
+    def unsampler(self, model, sampler_name, steps, end_at_step, scheduler, positive, latent_image, trajectories, old_qk):
+        # hardcoded to make attention injection faster and simpler
         cfg = 1
         # PREPARTION
         latent = latent_image
@@ -67,7 +66,7 @@ class UnsamplerFlattenNode:
         latent_image = latent_image.to(device)
 
         positive = comfy.sample.convert_cond(positive)
-        negative = comfy.sample.convert_cond(negative)
+        negative = comfy.sample.convert_cond([])
 
         models, inference_memory = comfy.sample.get_additional_models(
             positive, negative, model.model_dtype())

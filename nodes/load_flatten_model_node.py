@@ -8,7 +8,7 @@ from ..modules.unet import UNetModel as FlattenModel
 
 
 class PatchBaseModel(comfy.model_base.BaseModel):
-    def __init__(self, model_config, model_type=comfy.model_base.ModelType.EPS, device=None, unet_model=FlattenModel):
+    def __init__(self, model_config, *args, model_type=comfy.model_base.ModelType.EPS, device=None, unet_model=FlattenModel, **kwargs):
         super().__init__(model_config, model_type, device, FlattenModel)
 
 
@@ -42,7 +42,8 @@ class FlattenCheckpointLoaderNode:
                 0, timestep_.size(0), frame_count)]
 
             # Do injection if needed
-            transformer_options = apply_params.get('transformer_options', {})
+            transformer_options = apply_params['c'].get(
+                'transformer_options', {})
             flatten_options = transformer_options.get('flatten', None)
             if flatten_options is None:
                 raise Exception(
@@ -52,8 +53,10 @@ class FlattenCheckpointLoaderNode:
             if 'ad_params' in transformer_options:
                 idxs = transformer_options['ad_params']['sub_idxs']
 
-            if flatten_options['injection_handler'] is not None:
-                flatten_options['injection_handler'](timestep_[0].item(), idxs)
+            injection_handler = flatten_options.get('injection_handler', None)
+            if injection_handler is not None:
+                flatten_options['injection_handler'](
+                    timestep_[0], idxs, len_conds)
 
             del apply_params['timestep']
             conditioning = {}
