@@ -33,9 +33,7 @@ class KSamplerFlattenNode:
 
     def sample(self, model, add_noise, noise_seed, steps, injection_steps, old_qk, trajectories, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0):
         # PREPARTION
-        injections = {}
-        for key in latent_image["injections"]:
-            injections[key] = list(reversed(latent_image["injections"][key]))
+        injections = latent_image["injections"]
 
         latent = latent_image
         latent_image = latent["samples"]
