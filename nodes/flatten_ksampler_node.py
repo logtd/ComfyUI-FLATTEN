@@ -35,11 +35,11 @@ class KSamplerFlattenNode:
         # PREPARTION
         injections = {}
         for key in latent_image["injections"]:
-            injections[key] = list(reversed(injections[key]))
+            injections[key] = list(reversed(latent_image["injections"][key]))
 
         latent = latent_image
         latent_image = latent["samples"]
-        # latent_image = rearrange(latent_image, "(b f) c h w -> b c f h w", b=1)
+
         transformer_options = {}
         if 'transformer_options' in model.model_options:
             transformer_options = model.model_options['transformer_options']
@@ -52,8 +52,6 @@ class KSamplerFlattenNode:
             }
         }
         model.model_options['transformer_options'] = transformer_options
-
-        # DO CLEANUP HERE JUST IN CASE
 
         device = comfy.model_management.get_torch_device()
 
@@ -91,8 +89,6 @@ class KSamplerFlattenNode:
         sigmas = sampler.sigmas
 
         pbar = comfy.utils.ProgressBar(steps)
-
-        callback_idx = 0
 
         def callback(step, x0, x, total_steps):
             self._clear_injections(model)
