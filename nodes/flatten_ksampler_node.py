@@ -72,21 +72,23 @@ class KSamplerFlattenNode:
                                           scheduler=scheduler, denoise=1.0, model_options=model.model_options)
 
         sigmas = sampler.sigmas
-        sigma_to_step = {}
+        timestep_to_step = {}
         for i, sigma in enumerate(sigmas):
-            sigma_to_step[sigma] = i
+            t = int(model.model.model_sampling.timestep(sigma))
+            timestep_to_step[t] = i
 
         # FLATTEN TRANSFORMER OPTIONS
         transformer_options = model.model_options.get(
             'transformer_options', {})
 
-        def injection_handler(sigma, idxs):
+        def injection_handler(sigma, idxs, len_conds):
             if idxs is None:
                 idxs = list(range(original_shape[0]))
             self._clear_injections(model)
-            step = sigma_to_step[sigma]
+            t = int(model.model.model_sampling.timestep(sigma))
+            step = timestep_to_step[t]
             if step < injection_steps:
-                self._inject(model, injections, device, step, idxs)
+                self._inject(model, injections, device, step, idxs, len_conds)
             else:
                 self._clear_injections(model)
 
@@ -144,15 +146,17 @@ class KSamplerFlattenNode:
                 module.inject_q = None
                 module.inject_k = None
 
-    def _inject(self, model, injection, device, step):
+    def _inject(self, model, injection, device, step, idxs, len_conds):
         model = model.model.diffusion_model
 
         res_dict = {1: [0, 1], 2: [0]}
         res_idx = 0
         for res in res_dict:
             for block in res_dict[res]:
+                feature = torch.cat(
+                    [injection[f'features{res_idx}'][step][0, :, idxs].unsqueeze(0)]*len_conds)
                 model.output_blocks[3*res +
-                                    block][0].out_layers_features = injection[f'features{res_idx}'][step].to(device)
+                                    block][0].out_layers_features = feature.to(device)
                 res_idx += 1
 
         attn_dict = {1: [1, 2], 2: [0, 1, 2], 3: [0]}
@@ -161,6 +165,10 @@ class KSamplerFlattenNode:
             for block in attn_dict[attn]:
                 module = model.output_blocks[3*attn +
                                              block][1].transformer_blocks[0].attn1
-                module.inject_q = injection[f'q{attn_idx}'][step].to(device)
-                module.inject_k = injection[f'k{attn_idx}'][step].to(device)
+                q = torch.cat(
+                    [injection[f'q{attn_idx}'][step][idxs]] * len_conds)
+                module.inject_q = q.to(device)
+                k = torch.cat(
+                    [injection[f'k{attn_idx}'][step][idxs]] * len_conds)
+                module.inject_k = k.to(device)
                 attn_idx += 1
