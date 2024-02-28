@@ -1,18 +1,9 @@
-import torch
 from einops import rearrange
-import comfy.sd
-import comfy.model_base
-import folder_paths
-import comfy.ldm.modules.diffusionmodules.openaimodel as openaimodel
-from ..modules.unet import UNetModel as FlattenModel
+import comfy.samplers
+import torch
 
 
-class PatchBaseModel(comfy.model_base.BaseModel):
-    def __init__(self, model_config, *args, model_type=comfy.model_base.ModelType.EPS, device=None, unet_model=FlattenModel, **kwargs):
-        super().__init__(model_config, model_type, device, FlattenModel)
-
-
-class FlattenCheckpointLoaderNode:
+class KSamplerFlattenNode:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
@@ -68,6 +59,9 @@ class FlattenCheckpointLoaderNode:
         noise = noise.to(device)
         latent_image = latent_image.to(device)
 
+        positive = comfy.sample.convert_cond(positive)
+        negative = comfy.sample.convert_cond(negative)
+
         models, inference_memory = comfy.sample.get_additional_models(
             positive, negative, model.model_dtype())
 
@@ -113,25 +107,26 @@ class FlattenCheckpointLoaderNode:
         pbar = comfy.utils.ProgressBar(steps)
 
         def callback(step, x0, x, total_steps):
+            # self._clear_injections(model)
+            # if step + 1 < injection_steps:
+            #     self._inject(model, injections, device, step + 1)
             pbar.update_absolute(step + 1, total_steps)
 
         self._clear_injections(model)
+        # if start_at_step < injection_steps:
+        #     self._inject(model, injections, device, start_at_step)
 
-        disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
-        samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
-                                      denoise=denoise, disable_noise=False, start_step=start_at_step, last_step=end_at_step,
-                                      force_full_denoise=True, noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+        samples = sampler.sample(noise, positive, negative, cfg=cfg, latent_image=latent_image, force_full_denoise=False,
+                                 denoise_mask=noise_mask, sigmas=sigmas, start_step=start_at_step, last_step=end_at_step, callback=callback)
 
         # RETURN SAMPLES
         self._clear_injections(model)
         samples = samples.cpu()
 
+        comfy.sample.cleanup_additional_models(models)
+
         out = latent.copy()
         out["samples"] = samples
-
-        del injections
-        del injection_handler
-        del transformer_options
 
         return (out, )
 
