@@ -1,4 +1,3 @@
-from einops import rearrange
 import comfy.samplers
 import torch
 
@@ -12,32 +11,37 @@ class UnsamplerFlattenNode:
                  "end_at_step": ("INT", {"default": 0, "min": 0, "max": 10000}),
                  "sampler_name": (comfy.samplers.KSampler.SAMPLERS, ),
                  "scheduler": (comfy.samplers.KSampler.SCHEDULERS, ),
-                 #  "normalize": (["disable", "enable"], ),
+                 "normalize": (["disable", "enable"], ),
                  "positive": ("CONDITIONING", ),
                  "latent_image": ("LATENT", ),
                  "trajectories": ("TRAJECTORY", ),
                  "old_qk": ("INT", {"default": 0, "min": 0, "max": 1}),
                  }}
 
-    RETURN_TYPES = ("LATENT",)
+    RETURN_TYPES = ("LATENT", "INJECTIONS")
     FUNCTION = "unsampler"
 
     CATEGORY = "sampling"
 
-    def unsampler(self, model, sampler_name, steps, end_at_step, scheduler, positive, latent_image, trajectories, old_qk):
-        # hardcoded to make attention injection faster and simpler
-        cfg = 1
-        # PREPARTION
+    def unsampler(self, model, sampler_name, steps, end_at_step, scheduler, noramlize, positive, latent_image, trajectories, old_qk):
+        # DEFAULTS
+        device = comfy.model_management.get_torch_device()
+
+        cfg = 1  # hardcoded to make attention injection faster and simpler
+        noise_seed = 777  # no noise is added
+        negative = []
+        normalize = normalize == 'enable'
+
         latent = latent_image
         latent_image = latent["samples"]
         original_shape = latent_image.shape
-        # latent_image = rearrange(latent_image, "(b f) c h w -> b c f h w", b=1)
-        transformer_options = {}
-        if 'transformer_options' in model.model_options:
-            transformer_options = model.model_options['transformer_options']
+
+        # SETUP TRANSFORMER OPTIONS
+        original_transformer_options = model.model_options.get(
+            'transformer_options', {})
 
         transformer_options = {
-            **transformer_options,
+            **original_transformer_options,
             'flatten': {
                 'trajs': trajectories,
                 'old_qk': old_qk,
@@ -46,78 +50,74 @@ class UnsamplerFlattenNode:
         }
         model.model_options['transformer_options'] = transformer_options
 
-        normalize = False
-        device = comfy.model_management.get_torch_device()
-
-        end_at_step = min(end_at_step, steps-1)
-        end_at_step = steps - end_at_step
-
+        # SETUP NOISE
         noise = torch.zeros(latent_image.size(
         ), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+
         noise_mask = None
         if "noise_mask" in latent:
-            noise_mask = comfy.sample.prepare_mask(
-                latent["noise_mask"], noise.shape, device)
+            noise_mask = latent["noise_mask"]
 
-        real_model = None
-        real_model = model.model
-
-        noise = noise.to(device)
-        latent_image = latent_image.to(device)
-
-        positive = comfy.sample.convert_cond(positive)
-        negative = comfy.sample.convert_cond([])
-
-        models, inference_memory = comfy.sample.get_additional_models(
-            positive, negative, model.model_dtype())
-
-        comfy.model_management.load_models_gpu(
-            [model] + models, model.memory_required(noise.shape) + inference_memory)
-
-        sampler = comfy.samplers.KSampler(real_model, steps=steps, device=device, sampler=sampler_name,
+        # SETUP SAMPLING
+        sampler = comfy.samplers.KSampler(model.model, steps=steps, device=device, sampler=sampler_name,
                                           scheduler=scheduler, denoise=1.0, model_options=model.model_options)
+        ksampler = comfy.samplers.ksampler(sampler_name)
 
         sigmas = sigmas = sampler.sigmas.flip(0) + 0.0001
-        injection_dict = self._get_blank_injection_dict()
+        injection_dict = self._get_blank_injection_dict(steps)
         pbar = comfy.utils.ProgressBar(steps)
 
         def callback(step, x0, x, total_steps):
             pbar.update_absolute(step + 1, total_steps)
-            self._update_injections(model, injection_dict)
+            # model.model_options['transformer_options']['ad_params']['sub_idxs']
+            transformer_options = model.model_options.get(
+                'transformer_options', {})
+            ad_params = transformer_options.get('ad_params', {})
+            sub_idxs = ad_params.get('sub_idxs', None)
+            if sub_idxs is None:
+                sub_idxs = list(range(original_shape[0]))
+            self._update_injections(model, injection_dict, step, sub_idxs)
 
+        disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+
+        # UNSAMPLE MODEL
         self._clear_injections(model)
+        samples = comfy.sample.sample_custom(model, noise, cfg, ksampler, sigmas, positive, negative,
+                                             latent_image, noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
-        samples = sampler.sample(noise, positive, negative, cfg=cfg, latent_image=latent_image, force_full_denoise=False,
-                                 denoise_mask=noise_mask, sigmas=sigmas, start_step=0, last_step=end_at_step, callback=callback)
-
+        # CLEANUP
         self._clear_injections(model)
+        model.model_options['transformer_options'] = original_transformer_options
+        del transformer_options
+        del callback
+
+        # RETURN SAMPLES
         if normalize:
             # technically doesn't normalize because unsampling is not guaranteed to end at a std given by the schedule
             samples -= samples.mean()
             samples /= samples.std()
-        samples = samples.cpu()
 
-        comfy.sample.cleanup_additional_models(models)
+        out = latent.copy()
+        out['samples'] = samples
+        return (out, injection_dict)
 
-        return ({'samples': samples, 'injections': injection_dict},)
-
-    def _get_blank_injection_dict(self):
+    def _get_blank_injection_dict(self, steps):
         return {
-            'features0': [],
-            'features1': [],
-            'features2': [],
-            'q4': [],
-            'k4': [],
-            'q5': [],
-            'k5': [],
-            'q6': [],
-            'k6': [],
-            'q7': [],
-            'k7': [],
-            'q8': [],
-            'k8': [],
-            'q9': [],
-            'k9': []
+            'features0': [None] * steps,
+            'features1': [None] * steps,
+            'features2': [None] * steps,
+            'q4': [None] * steps,
+            'k4': [None] * steps,
+            'q5': [None] * steps,
+            'k5': [None] * steps,
+            'q6': [None] * steps,
+            'k6': [None] * steps,
+            'q7': [None] * steps,
+            'k7': [None] * steps,
+            'q8': [None] * steps,
+            'k8': [None] * steps,
+            'q9': [None] * steps,
+            'k9': [None] * steps,
         }
 
     def _clear_injections(self, model):
@@ -136,15 +136,20 @@ class UnsamplerFlattenNode:
                 module.inject_q = None
                 module.inject_k = None
 
-    def _update_injections(self, model, injection):
+    def _update_injections(self, model, injection, step, idxs):
         model = model.model.diffusion_model
 
         res_dict = {1: [0, 1], 2: [0]}
         res_idx = 0
         for res in res_dict:
             for block in res_dict[res]:
-                injection[f'features{res_idx}'].append(
-                    model.output_blocks[3*res+block][0].out_layers_features.cpu())
+                feature = model.output_blocks[3*res +
+                                              block][0].out_layers_features.cpu()
+                if injection[f'features{res_idx}'][step] is not None:
+                    injection[f'features{res_idx}'][step] = torch.cat(
+                        [injection[f'features{res_idx}'][step], feature], dim=2)
+                else:
+                    injection[f'features{res_idx}'][step] = feature
                 res_idx += 1
 
         attn_dict = {1: [1, 2], 2: [0, 1, 2], 3: [0]}
@@ -153,6 +158,17 @@ class UnsamplerFlattenNode:
             for block in attn_dict[attn]:
                 module = model.output_blocks[3*attn +
                                              block][1].transformer_blocks[0].attn1
-                injection[f'q{attn_idx}'].append(module.q.cpu())
-                injection[f'k{attn_idx}'].append(module.k.cpu())
+                q = module.q.cpu()
+                if injection[f'q{attn_idx}'][step] is not None:
+                    injection[f'q{attn_idx}'][step] = torch.cat(
+                        injection[f'q{attn_idx}'][step], q)
+                else:
+                    injection[f'q{attn_idx}'][step] = q
+                k = module.k.cpu()
+                if injection[f'k{attn_idx}'][step] is not None:
+                    injection[f'k{attn_idx}'][step] = torch.cat(
+                        injection[f'k{attn_idx}'][step], k)
+                else:
+                    injection[f'k{attn_idx}'][step] = k
+
                 attn_idx += 1

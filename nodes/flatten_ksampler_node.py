@@ -1,6 +1,7 @@
-from einops import rearrange
-import comfy.samplers
 import torch
+import comfy.sd
+import comfy.model_base
+import comfy.samplers
 
 
 class KSamplerFlattenNode:
@@ -8,6 +9,7 @@ class KSamplerFlattenNode:
     def INPUT_TYPES(s):
         return {"required":
                 {"model": ("MODEL",),
+                 "injections": ("INJECTIONS",),
                  "add_noise": (["enable", "disable"], ),
                  "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                  "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
@@ -31,44 +33,31 @@ class KSamplerFlattenNode:
 
     CATEGORY = "sampling"
 
-    def sample(self, model, add_noise, noise_seed, steps, injection_steps, old_qk, trajectories, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0):
+    def sample(self, model, injections, add_noise, noise_seed, steps, injection_steps, old_qk, trajectories, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0):
+        # DEFAULTS
         device = comfy.model_management.get_torch_device()
-
-        injections = latent_image["injections"]
 
         latent = latent_image
         latent_image = latent["samples"]
         original_shape = latent_image.shape
 
-        end_at_step = steps
-
-        noise = torch.zeros(latent_image.size(
-        ), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+        # SETUP NOISE
         noise_mask = None
         if "noise_mask" in latent:
             noise_mask = comfy.sample.prepare_mask(
                 latent["noise_mask"], noise.shape, device)
 
-        noise = torch.zeros(latent_image.size(
-        ), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
-        noise_mask = None
+        add_noise = add_noise == 'enable'
+        if not add_noise:
+            noise = torch.zeros(latent_image.size(
+            ), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+        else:
+            batch_inds = latent["batch_index"] if "batch_index" in latent else None
+            noise = comfy.sample.prepare_noise(
+                latent_image, noise_seed, batch_inds)
 
-        real_model = None
-        real_model = model.model
-
-        noise = noise.to(device)
-        latent_image = latent_image.to(device)
-
-        positive = comfy.sample.convert_cond(positive)
-        negative = comfy.sample.convert_cond(negative)
-
-        models, inference_memory = comfy.sample.get_additional_models(
-            positive, negative, model.model_dtype())
-
-        comfy.model_management.load_models_gpu(
-            [model] + models, model.memory_required(noise.shape) + inference_memory)
-
-        sampler = comfy.samplers.KSampler(real_model, steps=steps, device=device, sampler=sampler_name,
+        # SETUP SIGMAS AND STEPS
+        sampler = comfy.samplers.KSampler(model.model, steps=steps, device=device, sampler=sampler_name,
                                           scheduler=scheduler, denoise=1.0, model_options=model.model_options)
 
         sigmas = sampler.sigmas
@@ -78,7 +67,7 @@ class KSamplerFlattenNode:
             timestep_to_step[t] = i
 
         # FLATTEN TRANSFORMER OPTIONS
-        transformer_options = model.model_options.get(
+        original_transformer_options = model.model_options.get(
             'transformer_options', {})
 
         def injection_handler(sigma, idxs, len_conds):
@@ -93,7 +82,7 @@ class KSamplerFlattenNode:
                 self._clear_injections(model)
 
         transformer_options = {
-            **transformer_options,
+            **original_transformer_options,
             'flatten': {
                 'trajs': trajectories,
                 'old_qk': old_qk,
@@ -107,27 +96,24 @@ class KSamplerFlattenNode:
         pbar = comfy.utils.ProgressBar(steps)
 
         def callback(step, x0, x, total_steps):
-            # self._clear_injections(model)
-            # if step + 1 < injection_steps:
-            #     self._inject(model, injections, device, step + 1)
             pbar.update_absolute(step + 1, total_steps)
 
         self._clear_injections(model)
-        # if start_at_step < injection_steps:
-        #     self._inject(model, injections, device, start_at_step)
+        disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+        samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
+                                      denoise=denoise, disable_noise=False, start_step=start_at_step, last_step=end_at_step,
+                                      force_full_denoise=not return_with_leftover_noise, noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
-        samples = sampler.sample(noise, positive, negative, cfg=cfg, latent_image=latent_image, force_full_denoise=False,
-                                 denoise_mask=noise_mask, sigmas=sigmas, start_step=start_at_step, last_step=end_at_step, callback=callback)
-
-        # RETURN SAMPLES
+        # CLEANUP
         self._clear_injections(model)
-        samples = samples.cpu()
+        model.model_options['transformer_options'] = original_transformer_options
 
-        comfy.sample.cleanup_additional_models(models)
+        del injection_handler
+        del transformer_options
 
-        out = latent.copy()
+        # RETURN
+        out = {}
         out["samples"] = samples
-
         return (out, )
 
     def _clear_injections(self, model):

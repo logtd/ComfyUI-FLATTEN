@@ -46,10 +46,7 @@ class FlattenCheckpointLoaderNode:
             # Do injection if needed
             transformer_options = apply_params['c'].get(
                 'transformer_options', {})
-            flatten_options = transformer_options.get('flatten', None)
-            if flatten_options is None:
-                raise Exception(
-                    'Error: flatten requires use of a Flatten sampler')
+            flatten_options = transformer_options.get('flatten', {})
 
             idxs = None
             if 'ad_params' in transformer_options:

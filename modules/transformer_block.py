@@ -120,6 +120,11 @@ class BasicTransformerBlock(nn.Module):
         transformer_patches = {}
         transformer_patches_replace = {}
 
+        if block is not None:
+            transformer_block = (block[0], block[1], block_index)
+        else:
+            transformer_block = None
+
         for k in transformer_options:
             if k == "patches":
                 transformer_patches = transformer_options[k]
@@ -152,13 +157,40 @@ class BasicTransformerBlock(nn.Module):
         if self.attn2 is not None:
             # Cross-Attention
             norm_hidden_states = self.norm2(hidden_states)
+            # switch cross attention to self attention
+            if self.switch_temporal_ca_to_sa:
+                context_attn2 = norm_hidden_states
+            else:
+                context_attn2 = encoder_hidden_states
 
-            hidden_states = (
-                self.attn2(
-                    norm_hidden_states, context=encoder_hidden_states, mask=attention_mask
-                )
-                + hidden_states
-            )
+            value_attn2 = None
+            if "attn2_patch" in transformer_patches:
+                patch = transformer_patches["attn2_patch"]
+                value_attn2 = context_attn2
+                for p in patch:
+                    norm_hidden_states, context_attn2, value_attn2 = p(
+                        norm_hidden_states, context_attn2, value_attn2, extra_options)
+
+            attn2_replace_patch = transformer_patches_replace.get("attn2", {})
+
+            if transformer_block is not None and transformer_block in attn2_replace_patch:
+                if value_attn2 is None:
+                    value_attn2 = context_attn2
+                norm_hidden_states = self.attn2.to_q(norm_hidden_states)
+                context_attn2 = self.attn2.to_k(context_attn2)
+                value_attn2 = self.attn2.to_v(value_attn2)
+                hidden_states = attn2_replace_patch[transformer_block](
+                    norm_hidden_states, context_attn2, value_attn2, extra_options)
+                hidden_states = self.attn2.to_out(hidden_states)
+            else:
+                # Flatten adds the hidden states here and after the feed-forward
+                hidden_states = self.attn2(
+                    norm_hidden_states, context=context_attn2, mask=attention_mask) + hidden_states
+
+        if "attn2_output_patch" in transformer_patches:
+            patch = transformer_patches["attn2_output_patch"]
+            for p in patch:
+                norm_hidden_states = p(norm_hidden_states, extra_options)
 
         # Feed-forward
         hidden_states = self.ff(self.norm3(hidden_states)) + hidden_states
