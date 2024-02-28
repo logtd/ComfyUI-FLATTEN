@@ -41,6 +41,8 @@ class FlattenCheckpointLoaderNode:
             timestep_ = timestep_[torch.arange(
                 0, timestep_.size(0), frame_count)]
 
+            # Correct Flatten vars for any batching
+
             # Do injection if needed
             transformer_options = apply_params['c'].get(
                 'transformer_options', {})
@@ -52,6 +54,8 @@ class FlattenCheckpointLoaderNode:
             idxs = None
             if 'ad_params' in transformer_options:
                 idxs = transformer_options['ad_params']['sub_idxs']
+            transformer_options['flatten']['idxs'] = idxs
+            transformer_options['flatten']['video_length'] = frame_count
 
             injection_handler = flatten_options.get('injection_handler', None)
             if injection_handler is not None:
