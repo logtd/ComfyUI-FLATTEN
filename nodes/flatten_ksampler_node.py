@@ -9,8 +9,7 @@ class KSamplerFlattenNode:
     def INPUT_TYPES(s):
         return {"required":
                 {"model": ("MODEL",),
-                 "injections": ("INJECTIONS",),
-                 "add_noise": (["enable", "disable"], ),
+                 "add_noise": (["disable", "enable"], ),
                  "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                  "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
                  "injection_steps": ("INT", {"default": 15, "min": 1, "max": 10000}),
@@ -22,6 +21,7 @@ class KSamplerFlattenNode:
                  "positive": ("CONDITIONING", ),
                  "negative": ("CONDITIONING", ),
                  "latent_image": ("LATENT", ),
+                 "injections": ("INJECTIONS",),
                  "start_at_step": ("INT", {"default": 0, "min": 0, "max": 10000}),
                  "end_at_step": ("INT", {"default": 10000, "min": 0, "max": 10000}),
                  "return_with_leftover_noise": (["disable", "enable"], ),
@@ -33,7 +33,10 @@ class KSamplerFlattenNode:
 
     CATEGORY = "sampling"
 
-    def sample(self, model, injections, add_noise, noise_seed, steps, injection_steps, old_qk, trajectories, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0):
+    injection_step = 0
+    previous_timestep = None
+
+    def sample(self, model, add_noise, noise_seed, steps, injection_steps, old_qk, trajectories, cfg, sampler_name, scheduler, positive, negative, latent_image, injections, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0):
         # DEFAULTS
         device = comfy.model_management.get_torch_device()
 
@@ -70,14 +73,21 @@ class KSamplerFlattenNode:
         original_transformer_options = model.model_options.get(
             'transformer_options', {})
 
+        # step hack
+        self.previous_timestep = None
+        self.injection_step = 0
+
         def injection_handler(sigma, idxs, len_conds):
             if idxs is None:
                 idxs = list(range(original_shape[0]))
             self._clear_injections(model)
             t = int(model.model.model_sampling.timestep(sigma))
-            step = timestep_to_step[t]
-            if step < injection_steps:
-                self._inject(model, injections, device, step, idxs, len_conds)
+            if self.previous_timestep != t:
+                self.previous_timestep = t
+                self.injection_step += 1
+            if self.injection_step < injection_steps:
+                self._inject(model, injections, device,
+                             self.injection_step, idxs, len_conds)
             else:
                 self._clear_injections(model)
 
@@ -107,6 +117,8 @@ class KSamplerFlattenNode:
         # CLEANUP
         self._clear_injections(model)
         model.model_options['transformer_options'] = original_transformer_options
+        self.previous_timestep = None
+        self.injection_step = 0
 
         del injection_handler
         del transformer_options

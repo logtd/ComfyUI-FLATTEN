@@ -23,7 +23,7 @@ class UnsamplerFlattenNode:
 
     CATEGORY = "sampling"
 
-    def unsampler(self, model, sampler_name, steps, end_at_step, scheduler, noramlize, positive, latent_image, trajectories, old_qk):
+    def unsampler(self, model, sampler_name, steps, end_at_step, scheduler, normalize, positive, latent_image, trajectories, old_qk):
         # DEFAULTS
         device = comfy.model_management.get_torch_device()
 
