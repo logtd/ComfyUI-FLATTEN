@@ -74,13 +74,14 @@ class Transformer3DModel(nn.Module):
         residual = hidden_states
 
         # check resolution
+
         resolu = hidden_states.shape[-1]
-        trajs_dict = {}
+        trajs_dict = {**transformer_options["flatten"],
+                      "current_resolution": hidden_states.shape[-1]}
         trajs_dict["traj"] = transformer_options["flatten"]["trajs"]["traj{}".format(
             resolu)]
         trajs_dict["traj_mask"] = transformer_options["flatten"]["trajs"]["mask{}".format(
             resolu)]
-        trajs_dict["old_qk"] = transformer_options["flatten"]["old_qk"]
         trajs_dict["cond_size"] = cond_size
 
         hidden_states = self.norm(hidden_states)

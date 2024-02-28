@@ -1,174 +1,87 @@
-from einops import rearrange
-import comfy.samplers
 import torch
+from einops import rearrange
+import comfy.sd
+import comfy.model_base
+import folder_paths
+import comfy.ldm.modules.diffusionmodules.openaimodel as openaimodel
+from ..modules.unet import UNetModel as FlattenModel
 
 
-class KSamplerFlattenNode:
+class PatchBaseModel(comfy.model_base.BaseModel):
+    def __init__(self, model_config, *args, model_type=comfy.model_base.ModelType.EPS, device=None, unet_model=FlattenModel, **kwargs):
+        super().__init__(model_config, model_type, device, FlattenModel)
+
+
+class FlattenCheckpointLoaderNode:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required":
-                {"model": ("MODEL",),
-                 "add_noise": (["enable", "disable"], ),
-                 "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                 "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
-                 "injection_steps": ("INT", {"default": 15, "min": 1, "max": 10000}),
-                 "old_qk": ("INT", {"default": 0, "min": 0, "max": 1}),
-                 "trajectories": ("TRAJECTORY",),
-                 "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
-                 "sampler_name": (comfy.samplers.KSampler.SAMPLERS, ),
-                 "scheduler": (comfy.samplers.KSampler.SCHEDULERS, ),
-                 "positive": ("CONDITIONING", ),
-                 "negative": ("CONDITIONING", ),
-                 "latent_image": ("LATENT", ),
-                 "start_at_step": ("INT", {"default": 0, "min": 0, "max": 10000}),
-                 "end_at_step": ("INT", {"default": 10000, "min": 0, "max": 10000}),
-                 "return_with_leftover_noise": (["disable", "enable"], ),
-                 }
-                }
+        return {"required": {"ckpt_name": (folder_paths.get_filename_list("checkpoints"), ),
+                             }}
+    RETURN_TYPES = ("MODEL", "CLIP", "VAE")
+    FUNCTION = "load_checkpoint"
 
-    RETURN_TYPES = ("LATENT",)
-    FUNCTION = "sample"
+    CATEGORY = "loaders"
 
-    CATEGORY = "sampling"
+    def load_checkpoint(self, ckpt_name, output_vae=True, output_clip=True):
+        original_base = comfy.model_base.BaseModel
+        comfy.model_base.BaseModel = PatchBaseModel
+        ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
+        out = comfy.sd.load_checkpoint_guess_config(
+            ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
+        comfy.model_base.BaseModel = original_base
 
-    def sample(self, model, add_noise, noise_seed, steps, injection_steps, old_qk, trajectories, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0):
-        device = comfy.model_management.get_torch_device()
+        def model_function_wrapper(apply_model_func, apply_params):
+            # Prepare 3D latent
+            input_x = apply_params['input']
+            len_conds = len(apply_params['cond_or_uncond'])
+            frame_count = input_x.shape[0] // len_conds
+            input_x = rearrange(
+                input_x, "(b f) c h w -> b c f h w", b=len_conds)
+            timestep_ = apply_params['timestep']
+            timestep_ = timestep_[torch.arange(
+                0, timestep_.size(0), frame_count)]
 
-        injections = latent_image["injections"]
+            # Correct Flatten vars for any batching
 
-        latent = latent_image
-        latent_image = latent["samples"]
-        original_shape = latent_image.shape
+            # Do injection if needed
+            transformer_options = apply_params['c'].get(
+                'transformer_options', {})
+            flatten_options = transformer_options.get('flatten', None)
+            if flatten_options is None:
+                raise Exception(
+                    'Error: flatten requires use of a Flatten sampler')
 
-        end_at_step = steps
+            idxs = None
+            if 'ad_params' in transformer_options:
+                idxs = transformer_options['ad_params']['sub_idxs']
+            transformer_options['flatten']['idxs'] = idxs
+            transformer_options['flatten']['video_length'] = frame_count
 
-        noise = torch.zeros(latent_image.size(
-        ), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
-        noise_mask = None
-        if "noise_mask" in latent:
-            noise_mask = comfy.sample.prepare_mask(
-                latent["noise_mask"], noise.shape, device)
+            injection_handler = flatten_options.get('injection_handler', None)
+            if injection_handler is not None:
+                flatten_options['injection_handler'](
+                    timestep_[0], idxs, len_conds)
 
-        noise = torch.zeros(latent_image.size(
-        ), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
-        noise_mask = None
+            del apply_params['timestep']
+            conditioning = {}
+            for key in apply_params['c']:
+                value = apply_params['c'][key]
+                if key == 'c_crossattn':
+                    value = value[torch.arange(0, value.size(0), frame_count)]
 
-        real_model = None
-        real_model = model.model
+                conditioning[key] = value
 
-        noise = noise.to(device)
-        latent_image = latent_image.to(device)
+            conditioning
+            del apply_params['c']
+            del apply_params['input']
+            model_out = apply_model_func(input_x, timestep_, **conditioning)
+            # Clear injections
 
-        positive = comfy.sample.convert_cond(positive)
-        negative = comfy.sample.convert_cond(negative)
+            # Return 2D latent
+            model_out = rearrange(model_out, 'b c f h w -> (b f) c h w')
+            return model_out
 
-        models, inference_memory = comfy.sample.get_additional_models(
-            positive, negative, model.model_dtype())
+        model = out[0]
+        model.model_options['model_function_wrapper'] = model_function_wrapper
 
-        comfy.model_management.load_models_gpu(
-            [model] + models, model.memory_required(noise.shape) + inference_memory)
-
-        sampler = comfy.samplers.KSampler(real_model, steps=steps, device=device, sampler=sampler_name,
-                                          scheduler=scheduler, denoise=1.0, model_options=model.model_options)
-
-        sigmas = sampler.sigmas
-        timestep_to_step = {}
-        for i, sigma in enumerate(sigmas):
-            t = int(model.model.model_sampling.timestep(sigma))
-            timestep_to_step[t] = i
-
-        # FLATTEN TRANSFORMER OPTIONS
-        transformer_options = model.model_options.get(
-            'transformer_options', {})
-
-        def injection_handler(sigma, idxs, len_conds):
-            if idxs is None:
-                idxs = list(range(original_shape[0]))
-            self._clear_injections(model)
-            t = int(model.model.model_sampling.timestep(sigma))
-            step = timestep_to_step[t]
-            if step < injection_steps:
-                self._inject(model, injections, device, step, idxs, len_conds)
-            else:
-                self._clear_injections(model)
-
-        transformer_options = {
-            **transformer_options,
-            'flatten': {
-                'trajs': trajectories,
-                'old_qk': old_qk,
-                'injection_handler': injection_handler,
-                'original_shape': original_shape
-            }
-        }
-        model.model_options['transformer_options'] = transformer_options
-
-        # SAMPLE MODEL
-        pbar = comfy.utils.ProgressBar(steps)
-
-        def callback(step, x0, x, total_steps):
-            # self._clear_injections(model)
-            # if step + 1 < injection_steps:
-            #     self._inject(model, injections, device, step + 1)
-            pbar.update_absolute(step + 1, total_steps)
-
-        self._clear_injections(model)
-        # if start_at_step < injection_steps:
-        #     self._inject(model, injections, device, start_at_step)
-
-        samples = sampler.sample(noise, positive, negative, cfg=cfg, latent_image=latent_image, force_full_denoise=False,
-                                 denoise_mask=noise_mask, sigmas=sigmas, start_step=start_at_step, last_step=end_at_step, callback=callback)
-
-        # RETURN SAMPLES
-        self._clear_injections(model)
-        samples = samples.cpu()
-
-        comfy.sample.cleanup_additional_models(models)
-
-        out = latent.copy()
-        out["samples"] = samples
-
-        return (out, )
-
-    def _clear_injections(self, model):
-        model = model.model.diffusion_model
-        res_attn_dict = {1: [0, 1], 2: [0]}
-        for res in res_attn_dict:
-            for block in res_attn_dict[res]:
-                model.output_blocks[3*res+block][0].out_layers_features = None
-        attn_res_dict = {1: [1, 2], 2: [0, 1, 2], 3: [0]}
-        for attn in attn_res_dict:
-            for block in attn_res_dict[attn]:
-                module = model.output_blocks[3*attn +
-                                             block][1].transformer_blocks[0].attn1
-                module.q = None
-                module.k = None
-                module.inject_q = None
-                module.inject_k = None
-
-    def _inject(self, model, injection, device, step, idxs, len_conds):
-        model = model.model.diffusion_model
-
-        res_dict = {1: [0, 1], 2: [0]}
-        res_idx = 0
-        for res in res_dict:
-            for block in res_dict[res]:
-                feature = torch.cat(
-                    [injection[f'features{res_idx}'][step][0, :, idxs].unsqueeze(0)]*len_conds)
-                model.output_blocks[3*res +
-                                    block][0].out_layers_features = feature.to(device)
-                res_idx += 1
-
-        attn_dict = {1: [1, 2], 2: [0, 1, 2], 3: [0]}
-        attn_idx = 4
-        for attn in attn_dict:
-            for block in attn_dict[attn]:
-                module = model.output_blocks[3*attn +
-                                             block][1].transformer_blocks[0].attn1
-                q = torch.cat(
-                    [injection[f'q{attn_idx}'][step][idxs]] * len_conds)
-                module.inject_q = q.to(device)
-                k = torch.cat(
-                    [injection[f'k{attn_idx}'][step][idxs]] * len_conds)
-                module.inject_k = k.to(device)
-                attn_idx += 1
+        return out[:3]

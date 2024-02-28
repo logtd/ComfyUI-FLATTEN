@@ -59,7 +59,6 @@ class FullyFrameAttention(nn.Module):
         inner_dim = dim_head * heads
         context_dim = context_dim if context_dim is not None else query_dim
         self.upcast_attention = _ATTN_PRECISION == 'fp32'  # upcast_attention
-        self.upcast_softmax = self.upcast_attention  # upcast_softmax
 
         self.scale = dim_head**-0.5
 
@@ -163,7 +162,10 @@ class FullyFrameAttention(nn.Module):
         self.q = query
         if self.inject_q is not None:
             query = self.inject_q
-        query_old = query.clone()
+
+        query_old = None
+        if trajs_dict['old_qk'] == 1:
+            query_old = query.clone()
 
         # All frames
         query = rearrange(query, "(b f) d c -> b (f d) c", f=video_length)
@@ -175,7 +177,10 @@ class FullyFrameAttention(nn.Module):
         self.k = key
         if self.inject_k is not None:
             key = self.inject_k
-        key_old = key.clone()
+
+        key_old = None
+        if trajs_dict['old_qk'] == 1:
+            key_old = key.clone()
         value = self.to_v(context)
 
         if inter_frame:
@@ -229,17 +234,31 @@ class FullyFrameAttention(nn.Module):
             trajs = trajs_dict['traj']
             traj_mask = trajs_dict['traj_mask']
             cond_size = trajs_dict['cond_size']
-
+            original_batch_size = trajs_dict['original_shape'][0]
+            idxs = trajs_dict['idxs']
             trajs = rearrange(trajs, '(f n) l d -> f n l d',
-                              f=video_length, n=sequence_length)
+                              f=original_batch_size, n=sequence_length)
             traj_mask = rearrange(
-                traj_mask, '(f n) l -> f n l', f=video_length, n=sequence_length)
+                traj_mask, '(f n) l -> f n l', f=original_batch_size, n=sequence_length)
+
+            if idxs is not None:
+                trajs = trajs[idxs]
+                traj_mask = traj_mask[idxs]
+                # video_length = len(idxs) end = start + video_length
+                start = idxs[0] + 1
+                end = start + video_length - 1
+                t_offset = start - 1
+            else:
+                start = -video_length+1
+                end = trajs.shape[2]
+                t_offset = 0
             traj_mask = torch.cat([traj_mask[:, :, 0].unsqueeze(-1),
-                                   traj_mask[:, :, -video_length+1:]], dim=-1)
+                                   traj_mask[:, :, start:end]], dim=-1)
 
             traj_key_sequence_inds = torch.cat(
-                [trajs[:, :, 0, :].unsqueeze(-2), trajs[:, :, -video_length+1:, :]], dim=-2)
-            t_inds = traj_key_sequence_inds[:, :, :, 0]
+                [trajs[:, :, 0, :].unsqueeze(-2), trajs[:, :, start:end, :]], dim=-2)
+            t_inds = torch.clamp(
+                traj_key_sequence_inds[:, :, :, 0] - t_offset, min=0)
             x_inds = traj_key_sequence_inds[:, :, :, 1]
             y_inds = traj_key_sequence_inds[:, :, :, 2]
 
@@ -248,7 +267,7 @@ class FullyFrameAttention(nn.Module):
                              b=int(batch_size/video_length), f=video_length, h=h, w=w)
             _value = rearrange(value, '(b f) (h w) d -> b f h w d',
                                b=int(batch_size/video_length), f=video_length, h=h, w=w)
-            key_tempo = _key[:, t_inds, x_inds, y_inds]
+            key_tempo = _key[:, t_inds, x_inds, y_inds]  # This fails
             value_tempo = _value[:, t_inds, x_inds, y_inds]
             key_tempo = rearrange(key_tempo, 'b f n l d -> (b f) n l d')
             value_tempo = rearrange(value_tempo, 'b f n l d -> (b f) n l d')
@@ -284,4 +303,5 @@ class FullyFrameAttention(nn.Module):
         hidden_states = rearrange(
             hidden_states, "b (f d) c -> (b f) d c", f=video_length)
 
+        del trajs_dict
         return hidden_states
