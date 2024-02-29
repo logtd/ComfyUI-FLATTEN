@@ -172,16 +172,20 @@ class BasicTransformerBlock(nn.Module):
                         norm_hidden_states, context_attn2, value_attn2, extra_options)
 
             attn2_replace_patch = transformer_patches_replace.get("attn2", {})
+            block_attn2 = transformer_block
+            if block_attn2 not in attn2_replace_patch:
+                block_attn2 = block
 
-            if transformer_block is not None and transformer_block in attn2_replace_patch:
+            if block_attn2 is not None and block_attn2 in attn2_replace_patch:
                 if value_attn2 is None:
                     value_attn2 = context_attn2
                 norm_hidden_states = self.attn2.to_q(norm_hidden_states)
                 context_attn2 = self.attn2.to_k(context_attn2)
                 value_attn2 = self.attn2.to_v(value_attn2)
-                hidden_states = attn2_replace_patch[transformer_block](
+                attn2_hidden_states = attn2_replace_patch[block_attn2](
                     norm_hidden_states, context_attn2, value_attn2, extra_options)
-                hidden_states = self.attn2.to_out(hidden_states)
+                hidden_states = self.attn2.to_out(
+                    attn2_hidden_states) + hidden_states
             else:
                 # Flatten adds the hidden states here and after the feed-forward
                 hidden_states = self.attn2(

@@ -469,7 +469,11 @@ class UNetModel(nn.Module):
             print('Upsampling True')
             forward_upsample_size = True
 
-        transformer_options["original_shape"] = list(x.shape)
+        flatten_shape = x.shape
+        original_shape = (flatten_shape[0]*flatten_shape[2],
+                          flatten_shape[1], flatten_shape[3], flatten_shape[4])
+        transformer_options["original_shape"] = original_shape
+        transformer_options["flatten_shape"] = flatten_shape
         transformer_options["transformer_index"] = 0
         transformer_patches = transformer_options.get("patches", {})
 
