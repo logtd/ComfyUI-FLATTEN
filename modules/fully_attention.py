@@ -103,14 +103,6 @@ class FullyFrameAttention(nn.Module):
             batch_size * head_size, seq_len, dim // head_size)
         return tensor
 
-    def reshape_heads_to_batch_dim2(self, tensor):
-        batch_size, seq_len, dim = tensor.shape
-        head_size = self.heads
-        tensor = tensor.reshape(batch_size, seq_len,
-                                head_size, dim // head_size)
-        tensor = tensor.permute(0, 2, 1, 3)
-        return tensor
-
     def reshape_heads_to_batch_dim3(self, tensor):
         batch_size1, batch_size2, seq_len, dim = tensor.shape
         head_size = self.heads
@@ -235,7 +227,7 @@ class FullyFrameAttention(nn.Module):
             traj_mask = trajs_dict['traj_mask']
             cond_size = trajs_dict['cond_size']
             original_batch_size = trajs_dict['original_shape'][0]
-            idxs = trajs_dict['idxs']
+            idxs = trajs_dict.get('idxs', None)
             trajs = rearrange(trajs, '(f n) l d -> f n l d',
                               f=original_batch_size, n=sequence_length)
             traj_mask = rearrange(

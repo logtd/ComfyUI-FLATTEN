@@ -12,7 +12,6 @@ import comfy.ops
 ops = comfy.ops.disable_weight_init
 
 
-# DONE -- with quite a few assumptions
 class ResnetBlock3D(nn.Module):
     def __init__(
         self,
@@ -57,13 +56,10 @@ class ResnetBlock3D(nn.Module):
         if groups_out is None:
             groups_out = groups
 
-        # self.norm1 = torch.nn.GroupNorm(num_groups=groups, num_channels=channels, eps=eps, affine=True)
-        # self.conv1 = InflatedConv3d(channels, out_channels, kernel_size=3, stride=1, padding=1)
         if isinstance(kernel_size, list):
             padding = [k // 2 for k in kernel_size]
         else:
             padding = kernel_size // 2
-        # from comfy
         self.in_layers = nn.Sequential(
             operations.GroupNorm(32, channels, dtype=dtype, device=device),
             nn.SiLU(),  # comfy
@@ -78,7 +74,7 @@ class ResnetBlock3D(nn.Module):
             self.x_upd = Upsample3D(
                 channels, False, dims, dtype=dtype, device=device)
         elif down:
-            downsample_padding = 1  # VALIDATE
+            downsample_padding = 1
             self.h_upd = Downsample3D(
                 out_channels, use_conv=True, out_channels=out_channels, padding=downsample_padding, name="op"
             )
@@ -87,17 +83,6 @@ class ResnetBlock3D(nn.Module):
         else:
             self.h_upd = self.x_upd = nn.Identity()
 
-        # if emb_channels is not None:
-        #     if self.time_embedding_norm == "default":
-        #         time_emb_proj_out_channels = out_channels
-        #     elif self.time_embedding_norm == "scale_shift":
-        #         time_emb_proj_out_channels = out_channels * 2
-        #     else:
-        #         raise ValueError(f"unknown time_embedding_norm : {self.time_embedding_norm} ")
-
-        #     self.time_emb_proj = torch.nn.Linear(emb_channels, time_emb_proj_out_channels)
-        # else:
-        #     self.time_emb_proj = None
         self.skip_t_emb = skip_t_emb
         if self.skip_t_emb:
             self.emb_layers = None
@@ -111,59 +96,30 @@ class ResnetBlock3D(nn.Module):
                 ),
             )
 
-        # self.norm2 = torch.nn.GroupNorm(num_groups=groups_out, num_channels=out_channels, eps=eps, affine=True)
-        # self.dropout = torch.nn.Dropout(dropout)
-        # self.conv2 = InflatedConv3d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
-
         self.out_layers = nn.Sequential(
             operations.GroupNorm(32, self.out_channels,
                                  dtype=dtype, device=device),
             nn.SiLU(),
             nn.Dropout(p=dropout),
-            # operations.conv_nd(dims, self.out_channels, self.out_channels, kernel_size, padding=padding, dtype=dtype, device=device)
             InflatedConv3d(out_channels, out_channels, kernel_size=3,
                            stride=1, padding=1, dtype=dtype, device=device),
         )
 
-        # covered in in_layers default to silu
-        # if non_linearity == "swish":
-        #     self.nonlinearity = lambda x: F.silu(x)
-        # elif non_linearity == "mish":
-        #     self.nonlinearity = Mish()
-        # elif non_linearity == "silu":
-        #     self.nonlinearity = nn.SiLU()
-
-        # self.use_in_shortcut = self.channels != self.out_channels if use_in_shortcut is None else use_in_shortcut
-
-        # self.conv_shortcut = None
-        # if self.use_in_shortcut:
-        #     self.conv_shortcut = InflatedConv3d(channels, out_channels, kernel_size=1, stride=1, padding=0)
-
         if self.out_channels == channels:
             self.skip_connection = nn.Identity()
         elif use_conv:
-            # self.skip_connection = operations.conv_nd(
-            #     dims, channels, self.out_channels, kernel_size, padding=padding, dtype=dtype, device=device
-            # )
             self.skip_connection = InflatedConv3d(
                 channels, out_channels, kernel_size=kernel_size, padding=padding).to(dtype)
         else:
-            # self.skip_connection = operations.conv_nd(dims, channels, self.out_channels, 1, dtype=dtype, device=device)
             self.skip_connection = InflatedConv3d(channels, out_channels, kernel_size=1).half(
-            ).to(dtype)  # validate 1 should be kernel_size
+            ).to(dtype)
 
         # save features
         self.out_layers_features = None
         self.out_layers_inject_features = None
 
-    def forward(self, x, temb):
+    def forward(self, x, temb, transformer_options={}, **kwargs):
         input_tensor = x
-        # hidden_states = input_tensor
-
-        # hidden_states = self.norm1(hidden_states)
-        # hidden_states = self.nonlinearity(hidden_states)
-
-        # hidden_states = self.conv1(hidden_states)
         if self.updown:
             in_rest, in_conv = self.in_layers[:-1], self.in_layers[-1]
             h = in_rest(x)
@@ -173,23 +129,6 @@ class ResnetBlock3D(nn.Module):
             h = in_conv(h)
         else:
             h = self.in_layers(x)
-
-        # if temb is not None:
-        #     temb = self.time_emb_proj(self.nonlinearity(temb))[:, :, None, None, None] # VALIDATE [:, :,...] extra dimension here
-
-        # if temb is not None and self.time_embedding_norm == "default":
-        #     hidden_states = hidden_states + temb
-
-        # hidden_states = self.norm2(hidden_states)
-
-        # if temb is not None and self.use_scale_shift_norm:
-        #     scale, shift = torch.chunk(temb, 2, dim=1)
-        #     hidden_states = hidden_states * (1 + scale) + shift
-
-        # hidden_states = self.nonlinearity(hidden_states)
-
-        # hidden_states = self.dropout(hidden_states)
-        # hidden_states = self.conv2(hidden_states)
 
         emb = temb
         emb_out = None
@@ -209,13 +148,16 @@ class ResnetBlock3D(nn.Module):
             if emb_out is not None:
                 if self.exchange_temb_dims:
                     emb_out = rearrange(emb_out, "b t c ... -> b c t ...")
-                h = h + emb_out
+                if emb_out.shape[0] != h.shape[0]:  # ControlNet Hack TODO
+                    video_length = transformer_options['flatten']['original_shape'][0]
+                    emb_out = rearrange(
+                        emb_out, '(b f) t c h w -> b t (c f) h w', f=video_length)
+                h = h + emb_out  # (2, 320, 10, 64, 64) + (2, 320, 1, 1, 1)
             h = self.out_layers(h)
 
         if self.skip_connection is not None:
             input_tensor = self.skip_connection(input_tensor)
 
-        # save features  -- VALIDATE that nothing was skipped above
         self.out_layers_features = h
         if self.out_layers_inject_features is not None:
             h = self.out_layers_inject_features

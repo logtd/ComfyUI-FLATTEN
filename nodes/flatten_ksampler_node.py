@@ -58,6 +58,7 @@ class KSamplerFlattenNode:
             batch_inds = latent["batch_index"] if "batch_index" in latent else None
             noise = comfy.sample.prepare_noise(
                 latent_image, noise_seed, batch_inds)
+            noise = torch.cat([noise[0].unsqueeze(0)] * original_shape[0])
 
         # SETUP SIGMAS AND STEPS
         sampler = comfy.samplers.KSampler(model.model, steps=steps, device=device, sampler=sampler_name,
@@ -75,7 +76,7 @@ class KSamplerFlattenNode:
 
         # step hack
         self.previous_timestep = None
-        self.injection_step = 0
+        self.injection_step = -1
 
         def injection_handler(sigma, idxs, len_conds):
             if idxs is None:
@@ -90,6 +91,7 @@ class KSamplerFlattenNode:
                              self.injection_step, idxs, len_conds)
             else:
                 self._clear_injections(model)
+            return self.injection_step
 
         transformer_options = {
             **original_transformer_options,
@@ -97,7 +99,9 @@ class KSamplerFlattenNode:
                 'trajs': trajectories,
                 'old_qk': old_qk,
                 'injection_handler': injection_handler,
-                'original_shape': original_shape
+                'original_shape': original_shape,
+                'stage': 'sampling',
+                'injection_steps': injection_steps
             }
         }
         model.model_options['transformer_options'] = transformer_options

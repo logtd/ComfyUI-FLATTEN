@@ -135,9 +135,10 @@ def sample_trajectories(frames, device):
             active_traj = new_active_traj
             active_traj += [[pixel]
                             for pixel in pixel_set if pixel_set[pixel] == 0]
+        # these are vectors from point start to point end [(t,x,y), (t+1, x,y)...]
         all_traj += active_traj
 
-        useful_traj = [i for i in all_traj if len(i) > 1]
+        useful_traj = [segment for segment in all_traj if len(segment) > 1]
         for idx in range(len(useful_traj)):
             if useful_traj[idx][-1] == (-1, -1, -1):
                 useful_traj[idx] = useful_traj[idx][:-1]
@@ -150,7 +151,7 @@ def sample_trajectories(frames, device):
         all_points = set([(t, x, y) for t in range(T)
                          for x in range(H) for y in range(W)])
         left_points = all_points - set(trajs)
-        for p in list(left_points):
+        for p in list(left_points):  # add points that are missing
             useful_traj.append([p])
 
         longest_length = max([len(i) for i in useful_traj])
@@ -161,7 +162,7 @@ def sample_trajectories(frames, device):
         masks = []
 
         # create a dictionary to facilitate checking the trajectories to which each point belongs.
-        point_to_traj = {}
+        point_to_traj = {}  # point to vector/segmeent
         for traj in useful_traj:
             for p in traj:
                 point_to_traj[p] = traj
@@ -180,7 +181,8 @@ def sample_trajectories(frames, device):
                     traj = point_to_traj[(t, x, y)].copy()
                     traj.remove((t, x, y))
                     sequence = sequence + traj + \
-                        [(0, 0, 0) for k in range(longest_length-1-len(traj))]
+                        [(0, 0, 0) for k in range(longest_length-1-len(traj))
+                         ]  # add (0,0,0) to fill in gaps
                     sequence_mask[(window_sizes[resolution]*2+1) **
                                   2: (window_sizes[resolution]*2+1)**2 + len(traj)] = True
 

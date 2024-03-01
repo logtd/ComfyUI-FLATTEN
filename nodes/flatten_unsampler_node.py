@@ -45,7 +45,8 @@ class UnsamplerFlattenNode:
             'flatten': {
                 'trajs': trajectories,
                 'old_qk': old_qk,
-                'original_shape': original_shape
+                'original_shape': original_shape,
+                'stage': 'inversion'
             }
         }
         model.model_options['transformer_options'] = transformer_options

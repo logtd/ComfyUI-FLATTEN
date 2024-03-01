@@ -56,8 +56,9 @@ class FlattenCheckpointLoaderNode:
 
             injection_handler = flatten_options.get('injection_handler', None)
             if injection_handler is not None:
-                flatten_options['injection_handler'](
+                step = flatten_options['injection_handler'](
                     timestep_[0], idxs, len_conds)
+                flatten_options['step'] = step
 
             del apply_params['timestep']
             conditioning = {}

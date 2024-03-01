@@ -29,8 +29,10 @@ def apply_control(hsp, control, block_type):
 
 def forward_timestep_embed(ts, x, emb, context=None, transformer_options={}, output_shape=None, time_context=None, num_video_frames=None, image_only_indicator=None):
     for layer in ts:
-        if isinstance(layer, TimestepBlock) or isinstance(layer, ResnetBlock3D):
+        if isinstance(layer, TimestepBlock):
             x = layer(x, emb)
+        elif isinstance(layer, ResnetBlock3D):
+            x = layer(x, emb, transformer_options=transformer_options)
         elif isinstance(layer, Transformer3DModel):
             x = layer(x, context, transformer_options)
             if "transformer_index" in transformer_options:
