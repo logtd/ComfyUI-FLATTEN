@@ -6,7 +6,6 @@ Original research repo: [FLATTEN](https://github.com/yrcong/flatten)
 ## Table of Contents
 - [Installation](#installation)
   - [How to Install](#how-to-install)
-  - [How to Configure Models](#how-to-configure-models)
 - [Nodes](#nodes)
 - [Accompanying Node Repos](#accompanying-node-repos)
 - [Examples](#examples)
