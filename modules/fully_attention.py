@@ -25,7 +25,6 @@ else:
     _ATTN_PRECISION = "fp32"
 
 
-# Should be DONE except for KWARGS with a few variables -- VALIDATE/TODO
 class FullyFrameAttention(nn.Module):
     r"""
     A cross attention layer.
@@ -92,7 +91,6 @@ class FullyFrameAttention(nn.Module):
         self.inject_q = None
         self.k = None
         self.inject_k = None
-        # self.conds = 1
 
     def reshape_heads_to_batch_dim(self, tensor):
         batch_size, seq_len, dim = tensor.shape
@@ -142,8 +140,9 @@ class FullyFrameAttention(nn.Module):
         hidden_states = self.reshape_batch_dim_to_heads(hidden_states)
         return hidden_states
 
-    def forward(self, hidden_states, context=None, value=None, attention_mask=None, video_length=None, inter_frame=False, trajs_dict=None):
+    def forward(self, hidden_states, context=None, value=None, attention_mask=None, video_length=None, inter_frame=False, transformer_options={}, traj_options={}):
         batch_size, sequence_length, _ = hidden_states.shape
+        flatten_options = transformer_options['flatten']
 
         h = w = int(math.sqrt(sequence_length))
         if self.group_norm is not None:
@@ -156,7 +155,7 @@ class FullyFrameAttention(nn.Module):
             query = self.inject_q
 
         query_old = None
-        if trajs_dict['old_qk'] == 1:
+        if flatten_options['old_qk'] == 1:
             query_old = query.clone()
 
         # All frames
@@ -171,7 +170,7 @@ class FullyFrameAttention(nn.Module):
             key = self.inject_k
 
         key_old = None
-        if trajs_dict['old_qk'] == 1:
+        if flatten_options['old_qk'] == 1:
             key_old = key.clone()
         value = self.to_v(context)
 
@@ -215,7 +214,7 @@ class FullyFrameAttention(nn.Module):
                 hidden_states = self.group_norm(
                     hidden_states.transpose(1, 2)).transpose(1, 2)
 
-            if trajs_dict['old_qk'] == 1:
+            if flatten_options['old_qk'] == 1:
                 query = query_old
                 key = key_old
             else:
@@ -223,34 +222,20 @@ class FullyFrameAttention(nn.Module):
                 key = hidden_states
             value = hidden_states
 
-            trajs = trajs_dict['traj']
-            traj_mask = trajs_dict['traj_mask']
-            cond_size = trajs_dict['cond_size']
-            original_batch_size = trajs_dict['original_shape'][0]
-            idxs = trajs_dict.get('idxs', None)
-            trajs = rearrange(trajs, '(f n) l d -> f n l d',
-                              f=original_batch_size, n=sequence_length)
-            traj_mask = rearrange(
-                traj_mask, '(f n) l -> f n l', f=original_batch_size, n=sequence_length)
+            cond_size = traj_options['cond_size']
+            resolu = traj_options['resolution']
+            trajs = flatten_options['trajs'][f'traj{resolu}']
+            traj_mask = flatten_options['trajs'][f'mask{resolu}']
 
-            if idxs is not None:
-                trajs = trajs[idxs]
-                traj_mask = traj_mask[idxs]
-                # video_length = len(idxs) end = start + video_length
-                start = idxs[0] + 1
-                end = start + video_length - 1
-                t_offset = start - 1
-            else:
-                start = -video_length+1
-                end = trajs.shape[2]
-                t_offset = 0
-            traj_mask = torch.cat([traj_mask[:, :, 0].unsqueeze(-1),
-                                   traj_mask[:, :, start:end]], dim=-1)
+            start = -video_length+1
+            end = trajs.shape[2]
 
             traj_key_sequence_inds = torch.cat(
                 [trajs[:, :, 0, :].unsqueeze(-2), trajs[:, :, start:end, :]], dim=-2)
-            t_inds = torch.clamp(
-                traj_key_sequence_inds[:, :, :, 0] - t_offset, min=0)
+            traj_mask = torch.cat([traj_mask[:, :, 0].unsqueeze(-1),
+                                   traj_mask[:, :, start:end]], dim=-1)
+
+            t_inds = traj_key_sequence_inds[:, :, :, 0]
             x_inds = traj_key_sequence_inds[:, :, :, 1]
             y_inds = traj_key_sequence_inds[:, :, :, 2]
 
@@ -295,5 +280,4 @@ class FullyFrameAttention(nn.Module):
         hidden_states = rearrange(
             hidden_states, "b (f d) c -> (b f) d c", f=video_length)
 
-        del trajs_dict
         return hidden_states

@@ -1,8 +1,7 @@
 import random
 from einops import rearrange
 import torch
-from torchvision.models.optical_flow import Raft_Large_Weights
-from torchvision.models.optical_flow import raft_large
+
 import torchvision.transforms.functional as F
 
 
@@ -11,8 +10,6 @@ def preprocess(img1_batch, img2_batch, transforms):
     img1_batch = F.resize(img1_batch, size=[512, 512], antialias=False)
     img2_batch = F.resize(img2_batch, size=[512, 512], antialias=False)
     return transforms(img1_batch, img2_batch)
-
-#  "f h w c -> f c h w"
 
 
 def keys_with_same_value(dictionary):
@@ -58,15 +55,11 @@ def neighbors_index(point, window_size, H, W):
 
 
 @torch.no_grad()
-def sample_trajectories(frames, device):
-    weights = Raft_Large_Weights.DEFAULT
+def sample_trajectories(frames, model, weights, device):
+    model.eval()
     transforms = weights.transforms()
 
     clips = list(range(len(frames)))
-
-    model = raft_large(weights=Raft_Large_Weights.DEFAULT,
-                       progress=False).to(device)
-    model = model.eval()
     frames = rearrange(frames,  "f h w c -> f c h w")
     current_frames, next_frames = preprocess(
         frames[clips[:-1]], frames[clips[1:]], transforms)
@@ -117,7 +110,6 @@ def sample_trajectories(frames, device):
             conflict_points[k].pop(index_to_pop)
             for point in conflict_points[k]:
                 if point[0] != T-1:
-                    # stupid padding with (-1, -1, -1)
                     trajectories[point] = (-1, -1, -1)
 
         active_traj = []
@@ -179,6 +171,11 @@ def sample_trajectories(frames, device):
                     sequence_mask[:len(neighbours)+1] = True
 
                     traj = point_to_traj[(t, x, y)].copy()
+                    prev_t = 100
+                    for i_, (t_, x_, y_) in enumerate(traj):
+                        if t_ != prev_t+1 and prev_t != 100:
+                            print('got', (t_, x_, y_), 'for prev_t', prev_t)
+                        prev_t = t_
                     traj.remove((t, x, y))
                     sequence = sequence + traj + \
                         [(0, 0, 0) for k in range(longest_length-1-len(traj))
@@ -190,7 +187,13 @@ def sample_trajectories(frames, device):
                     masks.append(sequence_mask)
 
         seqs = torch.tensor(seqs)
+        seqs = torch.cat([seqs[:, 0, :].unsqueeze(
+            1), seqs[:, -len(frames)+1:, :]], dim=1)
+        seqs = rearrange(seqs, '(f n) l d -> f n l d', f=len(frames))
         masks = torch.stack(masks)
-        res["traj{}".format(resolution)] = seqs
-        res["mask{}".format(resolution)] = masks
+        masks = torch.cat([masks[:, 0].unsqueeze(
+            1), masks[:, -len(frames)+1:]], dim=1)
+        masks = rearrange(masks, '(f n) l -> f n l', f=len(frames))
+        res["traj{}".format(resolution)] = seqs.cpu()
+        res["mask{}".format(resolution)] = masks.cpu()
     return res

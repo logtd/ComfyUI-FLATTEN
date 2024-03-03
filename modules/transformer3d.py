@@ -8,7 +8,6 @@ import comfy.ops
 ops = comfy.ops.disable_weight_init
 
 
-# DONE
 class Transformer3DModel(nn.Module):
     def __init__(self,
                  in_channels,
@@ -76,13 +75,7 @@ class Transformer3DModel(nn.Module):
         # check resolution
 
         resolu = hidden_states.shape[-1]
-        trajs_dict = {**transformer_options["flatten"],
-                      "current_resolution": hidden_states.shape[-1]}
-        trajs_dict["traj"] = transformer_options["flatten"]["trajs"]["traj{}".format(
-            resolu)]
-        trajs_dict["traj_mask"] = transformer_options["flatten"]["trajs"]["mask{}".format(
-            resolu)]
-        trajs_dict["cond_size"] = cond_size
+        traj_options = {"resolution": resolu, "cond_size": cond_size}
 
         hidden_states = self.norm(hidden_states)
         if not self.use_linear:
@@ -101,11 +94,10 @@ class Transformer3DModel(nn.Module):
             hidden_states = block(
                 hidden_states,
                 context=context,
-                # timestep=timestep,
                 video_length=video_length,
                 inter_frame=inter_frame,
                 transformer_options=transformer_options,
-                trajs_dict=trajs_dict
+                traj_options=traj_options
             )
 
         # Output

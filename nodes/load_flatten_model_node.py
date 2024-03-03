@@ -49,15 +49,22 @@ class FlattenCheckpointLoaderNode:
             flatten_options = transformer_options.get('flatten', {})
 
             idxs = None
+            context_start = 0
             if 'ad_params' in transformer_options:
                 idxs = transformer_options['ad_params']['sub_idxs']
+                transformer_options['flatten']['trajs'] = transformer_options['flatten']['trajs_windows'][idxs[0]]
+                context_start = idxs[0]
+            else:
+                transformer_options['flatten']['trajs'] = transformer_options['flatten']['trajs_windows'][0]
+
             transformer_options['flatten']['idxs'] = idxs
             transformer_options['flatten']['video_length'] = frame_count
 
+            # Inject if sampling
             injection_handler = flatten_options.get('injection_handler', None)
             if injection_handler is not None:
                 step = flatten_options['injection_handler'](
-                    timestep_[0], idxs, len_conds)
+                    timestep_[0], context_start, len_conds)
                 flatten_options['step'] = step
 
             del apply_params['timestep']
@@ -73,7 +80,12 @@ class FlattenCheckpointLoaderNode:
             del apply_params['c']
             del apply_params['input']
             model_out = apply_model_func(input_x, timestep_, **conditioning)
-            # Clear injections
+
+            # Save injections if unsampling
+            save_injections_handler = flatten_options.get(
+                'save_injections_handler', None)
+            if save_injections_handler is not None:
+                save_injections_handler(context_start)
 
             # Return 2D latent
             model_out = rearrange(model_out, 'b c f h w -> (b f) c h w')

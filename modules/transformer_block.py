@@ -42,8 +42,6 @@ class BasicTransformerBlock(nn.Module):
         self.only_cross_attention = only_cross_attention
         self.use_ada_layer_norm = num_embeds_ada_norm is not None
 
-        # self.norm1 = nn.LayerNorm(dim)
-
         if self.ff_in:
             self.norm_in = operations.LayerNorm(
                 dim, dtype=dtype, device=device)
@@ -97,7 +95,7 @@ class BasicTransformerBlock(nn.Module):
             attention_mask=None,
             video_length=None,
             inter_frame=False,
-            trajs_dict=None
+            traj_options=None
     ):
         # Comfy setup
         extra_options = {}
@@ -128,12 +126,12 @@ class BasicTransformerBlock(nn.Module):
 
         if self.only_cross_attention:
             hidden_states = (
-                self.attn1(norm_hidden_states, encoder_hidden_states, attention_mask=attention_mask,
-                           inter_frame=inter_frame, trajs_dict=trajs_dict) + hidden_states
+                self.attn1(norm_hidden_states, encoder_hidden_states, attention_mask=attention_mask, video_length=video_length,
+                           inter_frame=inter_frame, transformer_options=transformer_options, traj_options=traj_options) + hidden_states
             )
         else:
             hidden_states = self.attn1(norm_hidden_states, attention_mask=attention_mask,
-                                       video_length=video_length, inter_frame=inter_frame, trajs_dict=trajs_dict) + hidden_states
+                                       video_length=video_length, inter_frame=inter_frame, transformer_options=transformer_options, traj_options=traj_options) + hidden_states
 
         if "middle_patch" in transformer_patches:
             patch = transformer_patches["middle_patch"]

@@ -16,25 +16,25 @@ class ResnetBlock3D(nn.Module):
     def __init__(
         self,
         channels,
-        emb_channels,  # =512,
-        dropout,  # =0.0,
+        emb_channels,
+        dropout,
         out_channels=None,
         use_conv=False,
-        use_scale_shift_norm=False,  # not in flatten
-        dims=2,  # not in flatten
-        use_checkpoint=False,  # not in flatten
-        up=False,  # not in flatten
-        down=False,  # not in flatten
-        kernel_size=3,  # not in flatten
-        exchange_temb_dims=False,  # not in flatten
-        skip_t_emb=False,  # not in flatten
-        dtype=None,  # not in flatten
-        device=None,  # not in flatten
-        operations=ops,  # not in flatten
-        groups=32,  # not in comfy
-        groups_out=None,  # not in comfy
-        pre_norm=True,  # not in comfy
-        eps=1e-6,  # not in comfy
+        use_scale_shift_norm=False,
+        dims=2,
+        use_checkpoint=False,
+        up=False,
+        down=False,
+        kernel_size=3,
+        exchange_temb_dims=False,
+        skip_t_emb=False,
+        dtype=None,
+        device=None,
+        operations=ops,
+        groups=32,
+        groups_out=None,
+        pre_norm=True,
+        eps=1e-6,
     ):
         super().__init__()
         self.pre_norm = pre_norm
@@ -124,7 +124,6 @@ class ResnetBlock3D(nn.Module):
             in_rest, in_conv = self.in_layers[:-1], self.in_layers[-1]
             h = in_rest(x)
             h = self.h_upd(h)
-            # VALIDATE this changed x ... should it also change input_tensor?
             x = self.x_upd(x)
             h = in_conv(h)
         else:
