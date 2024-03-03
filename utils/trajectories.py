@@ -171,11 +171,6 @@ def sample_trajectories(frames, model, weights, device):
                     sequence_mask[:len(neighbours)+1] = True
 
                     traj = point_to_traj[(t, x, y)].copy()
-                    prev_t = 100
-                    for i_, (t_, x_, y_) in enumerate(traj):
-                        if t_ != prev_t+1 and prev_t != 100:
-                            print('got', (t_, x_, y_), 'for prev_t', prev_t)
-                        prev_t = t_
                     traj.remove((t, x, y))
                     sequence = sequence + traj + \
                         [(0, 0, 0) for k in range(longest_length-1-len(traj))
