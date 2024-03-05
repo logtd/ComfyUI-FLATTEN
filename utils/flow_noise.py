@@ -11,15 +11,15 @@ def create_noise_generator(directions_list, num_frames):
             noise = torch.randn_like(latent_image[0])
             noise = torch.cat([noise.unsqueeze(0)]*num_frames)
             for t in range(num_frames):
-                for y in range(h):
-                    for x in range(w):
-                        if visited[t, y, x]:
+                for x in range(h):
+                    for y in range(w):
+                        if visited[t, x, y]:
                             continue
                         for directions in directions_list:
                             if (t, x, y) in directions:
                                 for (pt, px, py) in directions[(t, x, y)]:
-                                    noise[pt, :, py, px] = noise[t, :, y, x]
-                                    visited[pt, py, px] = True
+                                    noise[pt, :, px, py] = noise[t, :, x, y]
+                                    visited[pt, px, py] = True
                                 break
             return noise
         return create_noise

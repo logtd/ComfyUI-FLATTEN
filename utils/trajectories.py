@@ -76,8 +76,8 @@ def sample_trajectories(frames, model, weights, device):
     list_of_flows = model(current_frames.to(device), next_frames.to(device))
     predicted_flows = list_of_flows[-1]
 
-    predicted_flows[:, 0] = predicted_flows[:, 0]/image_height
-    predicted_flows[:, 1] = predicted_flows[:, 1]/image_width
+    predicted_flows[:, 0] = predicted_flows[:, 0]/image_width
+    predicted_flows[:, 1] = predicted_flows[:, 1]/image_height
 
     height_reso = image_height//8
     height_resoultions = [height_reso]
