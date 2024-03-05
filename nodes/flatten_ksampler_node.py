@@ -2,8 +2,10 @@ import torch
 import comfy.sd
 import comfy.model_base
 import comfy.samplers
+import comfy.k_diffusion.sampling
 
 from ..utils.injection_utils import inject_features, clear_injections
+from ..utils.flow_noise import create_noise_generator
 
 
 class KSamplerFlattenNode:
@@ -50,7 +52,7 @@ class KSamplerFlattenNode:
         noise_mask = None
         if "noise_mask" in latent:
             noise_mask = comfy.sample.prepare_mask(
-                latent["noise_mask"], noise.shape, device)
+                latent["noise_mask"], latent_image.shape, device)
 
         add_noise = add_noise == 'enable'
         if not add_noise:
@@ -106,6 +108,10 @@ class KSamplerFlattenNode:
         }
         model.model_options['transformer_options'] = transformer_options
 
+        # HACK NOISE
+        default_noise_sampler = comfy.k_diffusion.sampling.default_noise_sampler
+        comfy.k_diffusion.sampling.default_noise_sampler = create_noise_generator([traj['directions'] for traj in trajectories['trajectory_windows'].values()], latent_image.shape[0])
+
         # SAMPLE MODEL
         pbar = comfy.utils.ProgressBar(steps)
 
@@ -114,18 +120,22 @@ class KSamplerFlattenNode:
 
         clear_injections(model)
         disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
-        samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
+        try:
+            samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                                       denoise=denoise, disable_noise=False, start_step=start_at_step, last_step=end_at_step,
                                       force_full_denoise=not return_with_leftover_noise, noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+        except Exception as e:
+            print('Flatten error encountereed:', e)
+        finally:
+            # CLEANUP
+            clear_injections(model)
+            comfy.k_diffusion.sampling.default_noise_sampler = default_noise_sampler
+            model.model_options['transformer_options'] = original_transformer_options
+            self.previous_timestep = None
+            self.injection_step = 0
 
-        # CLEANUP
-        clear_injections(model)
-        model.model_options['transformer_options'] = original_transformer_options
-        self.previous_timestep = None
-        self.injection_step = 0
-
-        del injection_handler
-        del transformer_options
+            del injection_handler
+            del transformer_options
 
         # RETURN
         out = {}

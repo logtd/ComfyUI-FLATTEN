@@ -67,14 +67,11 @@ def get_window_size(resolution):
 @torch.no_grad()
 def sample_trajectories(frames, model, weights, device):
     model.eval()
-    transforms = weights.transforms()
     image_height = frames.shape[1]
     image_width = frames.shape[2]
 
     clips = list(range(len(frames)))
     frames = rearrange(frames,  "f h w c -> f c h w")
-    # current_frames, next_frames = preprocess(
-    #     frames[clips[:-1]], frames[clips[1:]], transforms)
     current_frames, next_frames = frames[clips[:-1]], frames[clips[1:]]
     list_of_flows = model(current_frames.to(device), next_frames.to(device))
     predicted_flows = list_of_flows[-1]
@@ -84,6 +81,7 @@ def sample_trajectories(frames, model, weights, device):
 
     height_reso = image_height//8
     height_resoultions = [height_reso]
+
     width_reso = image_width//8
     width_resolutions = [width_reso]
 
@@ -170,10 +168,15 @@ def sample_trajectories(frames, model, weights, device):
         masks = []
 
         # create a dictionary to facilitate checking the trajectories to which each point belongs.
+        directions = {}
         point_to_traj = {}  # point to vector/segmeent
         for traj in useful_traj:
             for p in traj:
                 point_to_traj[p] = traj
+                cut_traj = list(traj)
+                while len(cut_traj) > 0 and cut_traj[0] != p:
+                    cut_traj.pop(0)
+                directions[p] = cut_traj
 
         for t in range(T):
             for x in range(H):
@@ -206,4 +209,5 @@ def sample_trajectories(frames, model, weights, device):
         masks = rearrange(masks, '(f n) l -> f n l', f=len(frames))
         res["traj{}".format(height_resolution)] = seqs.cpu()
         res["mask{}".format(height_resolution)] = masks.cpu()
+        res['directions'] = directions
     return res
