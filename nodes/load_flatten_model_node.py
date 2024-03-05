@@ -50,12 +50,13 @@ class FlattenCheckpointLoaderNode:
 
             idxs = None
             context_start = 0
-            if 'ad_params' in transformer_options:
+            if 'ad_params' in transformer_options and transformer_options['ad_params'].get('sub_idxs', None) is not None:
                 idxs = transformer_options['ad_params']['sub_idxs']
-                transformer_options['flatten']['trajs'] = transformer_options['flatten']['trajs_windows'][idxs[0]]
                 context_start = idxs[0]
             else:
+                idxs = list(range(frame_count))
                 transformer_options['flatten']['trajs'] = transformer_options['flatten']['trajs_windows'][0]
+            transformer_options['flatten']['trajs'] = transformer_options['flatten']['trajs_windows'][context_start]
 
             transformer_options['flatten']['idxs'] = idxs
             transformer_options['flatten']['video_length'] = frame_count

@@ -40,12 +40,12 @@ def find_duplicates(input_list):
     return list(duplicates)
 
 
-def neighbors_index(point, window_size, H, W):
+def neighbors_index(point, h_size, w_size, H, W):
     """return the spatial neighbor indices"""
     t, x, y = point
     neighbors = []
-    for i in range(-window_size, window_size + 1):
-        for j in range(-window_size, window_size + 1):
+    for i in range(-h_size, h_size + 1):
+        for j in range(-w_size, w_size + 1):
             if i == 0 and j == 0:
                 continue
             if x + i < 0 or x + i >= H or y + j < 0 or y + j >= W:
@@ -54,35 +54,49 @@ def neighbors_index(point, window_size, H, W):
     return neighbors
 
 
+def get_window_size(resolution):
+    # this isn't always correct and needs an actual calculation
+    if resolution > 64:
+        return 4
+    elif resolution > 32:
+        return 2
+    else:
+        return 1
+
+
 @torch.no_grad()
 def sample_trajectories(frames, model, weights, device):
     model.eval()
     transforms = weights.transforms()
+    image_height = frames.shape[1]
+    image_width = frames.shape[2]
 
     clips = list(range(len(frames)))
     frames = rearrange(frames,  "f h w c -> f c h w")
-    current_frames, next_frames = preprocess(
-        frames[clips[:-1]], frames[clips[1:]], transforms)
+    # current_frames, next_frames = preprocess(
+    #     frames[clips[:-1]], frames[clips[1:]], transforms)
+    current_frames, next_frames = frames[clips[:-1]], frames[clips[1:]]
     list_of_flows = model(current_frames.to(device), next_frames.to(device))
     predicted_flows = list_of_flows[-1]
 
-    predicted_flows = predicted_flows/512
+    predicted_flows[:, 0] = predicted_flows[:, 0]/image_height
+    predicted_flows[:, 1] = predicted_flows[:, 1]/image_width
 
-    # TODO make resolution configurable
-    # All these are needed with 512x512 due to downsampling
-    resolutions = [64, 32, 16, 8]
+    height_reso = image_height//8
+    height_resoultions = [height_reso]
+    width_reso = image_width//8
+    width_resolutions = [width_reso]
+
     res = {}
-    window_sizes = {
-        # 128: 2,
-        64: 2,
-        32: 1,
-        16: 1,
-        8: 1}
 
-    for resolution in resolutions:
+    for height_resolution, width_resolution in zip(height_resoultions, width_resolutions):
         trajectories = {}
-        predicted_flow_resolu = torch.round(resolution*torch.nn.functional.interpolate(
-            predicted_flows, scale_factor=(resolution/512, resolution/512)))
+        x_flows = torch.round(height_resolution*torch.nn.functional.interpolate(
+            predicted_flows[:, 1].unsqueeze(1), scale_factor=(height_resolution/image_height, width_resolution/image_width)))
+        y_flows = torch.round(width_resolution*torch.nn.functional.interpolate(
+            predicted_flows[:, 0].unsqueeze(1), scale_factor=(height_resolution/image_height, width_resolution/image_width)))
+
+        predicted_flow_resolu = torch.cat([y_flows, x_flows], dim=1)
 
         T = predicted_flow_resolu.shape[0]+1
         H = predicted_flow_resolu.shape[2]
@@ -146,9 +160,11 @@ def sample_trajectories(frames, model, weights, device):
         for p in list(left_points):  # add points that are missing
             useful_traj.append([p])
 
-        longest_length = max([len(i) for i in useful_traj])
-        sequence_length = (
-            window_sizes[resolution]*2+1)**2 + longest_length - 1
+        longest_length = max([len(traj) for traj in useful_traj])
+        h_size = get_window_size(height_resolution)
+        w_size = get_window_size(width_resolution)
+        window_size = (h_size*2+1) * (w_size*2+1)
+        sequence_length = window_size + longest_length - 1
 
         seqs = []
         masks = []
@@ -163,9 +179,9 @@ def sample_trajectories(frames, model, weights, device):
             for x in range(H):
                 for y in range(W):
                     neighbours = neighbors_index(
-                        (t, x, y), window_sizes[resolution], H, W)
+                        (t, x, y), h_size, w_size, H, W)
                     sequence = [(t, x, y)]+neighbours + [(0, 0, 0)
-                                                         for i in range((window_sizes[resolution]*2+1)**2-1-len(neighbours))]
+                                                         for i in range(window_size-1-len(neighbours))]
                     sequence_mask = torch.zeros(
                         sequence_length, dtype=torch.bool)
                     sequence_mask[:len(neighbours)+1] = True
@@ -175,8 +191,7 @@ def sample_trajectories(frames, model, weights, device):
                     sequence = sequence + traj + \
                         [(0, 0, 0) for k in range(longest_length-1-len(traj))
                          ]  # add (0,0,0) to fill in gaps
-                    sequence_mask[(window_sizes[resolution]*2+1) **
-                                  2: (window_sizes[resolution]*2+1)**2 + len(traj)] = True
+                    sequence_mask[window_size:window_size + len(traj)] = True
 
                     seqs.append(sequence)
                     masks.append(sequence_mask)
@@ -189,6 +204,6 @@ def sample_trajectories(frames, model, weights, device):
         masks = torch.cat([masks[:, 0].unsqueeze(
             1), masks[:, -len(frames)+1:]], dim=1)
         masks = rearrange(masks, '(f n) l -> f n l', f=len(frames))
-        res["traj{}".format(resolution)] = seqs.cpu()
-        res["mask{}".format(resolution)] = masks.cpu()
+        res["traj{}".format(height_resolution)] = seqs.cpu()
+        res["mask{}".format(height_resolution)] = masks.cpu()
     return res

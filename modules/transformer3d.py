@@ -74,8 +74,11 @@ class Transformer3DModel(nn.Module):
 
         # check resolution
 
-        resolu = hidden_states.shape[-1]
-        traj_options = {"resolution": resolu, "cond_size": cond_size}
+        resolu = hidden_states.shape[-2]  # height
+        height = resolu
+        width = hidden_states.shape[-1]
+        traj_options = {"resolution": resolu,
+                        "cond_size": cond_size, "height": height, "width": width}
 
         hidden_states = self.norm(hidden_states)
         if not self.use_linear:

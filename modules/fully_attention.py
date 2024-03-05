@@ -144,7 +144,10 @@ class FullyFrameAttention(nn.Module):
         batch_size, sequence_length, _ = hidden_states.shape
         flatten_options = transformer_options['flatten']
 
-        h = w = int(math.sqrt(sequence_length))
+        # h = w = int(math.sqrt(sequence_length))
+        h = traj_options['height']
+        w = traj_options['width']
+        target_resolution = flatten_options['input_shape'][-2]
         if self.group_norm is not None:
             hidden_states = self.group_norm(
                 hidden_states.transpose(1, 2)).transpose(1, 2)
@@ -207,7 +210,7 @@ class FullyFrameAttention(nn.Module):
             hidden_states = self._other_attention(
                 query, key, value, attention_mask)
 
-        if h in [64]:
+        if h in [target_resolution]:
             hidden_states = rearrange(
                 hidden_states, "b (f d) c -> (b f) d c", f=video_length)
             if self.group_norm is not None:
