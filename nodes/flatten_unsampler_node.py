@@ -1,7 +1,9 @@
 import comfy.samplers
 import torch
+import comfy.k_diffusion.sampling
 
 from ..utils.injection_utils import get_blank_injection_dict, clear_injections, update_injections
+from ..utils.flow_noise import create_noise_generator
 
 
 class UnsamplerFlattenNode:
@@ -61,12 +63,16 @@ class UnsamplerFlattenNode:
         model.model_options['transformer_options'] = transformer_options
 
         # SETUP NOISE
+        default_noise_sampler = comfy.k_diffusion.sampling.default_noise_sampler
+        comfy.k_diffusion.sampling.default_noise_sampler = create_noise_generator(
+            [traj['directions'] for traj in trajectories['trajectory_windows'].values()], latent_image.shape[0])
         noise = torch.zeros(latent_image.size(
         ), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
 
         noise_mask = None
         if "noise_mask" in latent:
-            noise_mask = latent["noise_mask"]
+            noise_mask = comfy.sample.prepare_mask(
+                latent["noise_mask"], latent_image.shape, device)
 
         # SETUP SAMPLING
         sampler = comfy.samplers.KSampler(model.model, steps=steps, device=device, sampler=sampler_name,
@@ -82,16 +88,21 @@ class UnsamplerFlattenNode:
         disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
 
         # UNSAMPLE MODEL
-        clear_injections(model)
-        samples = comfy.sample.sample_custom(model, noise, cfg, ksampler, sigmas, positive, negative,
-                                             latent_image, noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
-
-        # CLEANUP
-        clear_injections(model)
-        model.model_options['transformer_options'] = original_transformer_options
-        del transformer_options
-        del callback
-        del save_injections_handler
+        try:
+            clear_injections(model)
+            samples = comfy.sample.sample_custom(model, noise, cfg, ksampler, sigmas, positive, negative,
+                                                 latent_image, noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+        except Exception as e:
+            print('Flatten Unsampler error encountereed:', e)
+            raise e
+        finally:
+            # CLEANUP
+            clear_injections(model)
+            comfy.k_diffusion.sampling.default_noise_sampler = default_noise_sampler
+            model.model_options['transformer_options'] = original_transformer_options
+            del transformer_options
+            del callback
+            del save_injections_handler
 
         # RETURN SAMPLES
         if normalize:
