@@ -127,24 +127,20 @@ class FullyFrameAttention(nn.Module):
         hidden_states = self.reshape_batch_dim_to_heads(hidden_states)
         return hidden_states
 
-    def _other_attention(self, query, key, value, attention_mask):
-        query = query.contiguous()
-        key = key.contiguous()
-        value = value.contiguous()
+    def _attention_mechanism(self, query, key, value, attention_mask):
+        # Comfy default attention mechanism
         if attention_mask is not None:
             hidden_states = optimized_attention_masked(
-                query, key, value, attention_mask)
+                query, key, value, self.heads, attention_mask)
         else:
             hidden_states = optimized_attention(
-                query, key, value, attention_mask)
-        hidden_states = self.reshape_batch_dim_to_heads(hidden_states)
+                query, key, value, self.heads)
         return hidden_states
 
     def forward(self, hidden_states, context=None, value=None, attention_mask=None, video_length=None, inter_frame=False, transformer_options={}, traj_options={}):
         batch_size, sequence_length, _ = hidden_states.shape
         flatten_options = transformer_options['flatten']
 
-        # h = w = int(math.sqrt(sequence_length))
         h = traj_options['height']
         w = traj_options['width']
         target_resolution = flatten_options['input_shape'][-2]
@@ -161,11 +157,6 @@ class FullyFrameAttention(nn.Module):
         if flatten_options['old_qk'] == 1:
             query_old = query.clone()
 
-        # All frames
-        query = rearrange(query, "(b f) d c -> b (f d) c", f=video_length)
-
-        query = self.reshape_heads_to_batch_dim(query)
-
         context = context if context is not None else hidden_states
         key = self.to_k(context)
         self.k = key
@@ -177,20 +168,9 @@ class FullyFrameAttention(nn.Module):
             key_old = key.clone()
         value = self.to_v(context)
 
-        if inter_frame:
-            key = rearrange(key, "(b f) d c -> b f d c",
-                            f=video_length)[:, [0, -1]]
-            value = rearrange(value, "(b f) d c -> b f d c",
-                              f=video_length)[:, [0, -1]]
-            key = rearrange(key, "b f d c -> b (f d) c",)
-            value = rearrange(value, "b f d c -> b (f d) c")
-        else:
-            # All frames
-            key = rearrange(key, "(b f) d c -> b (f d) c", f=video_length)
-            value = rearrange(value, "(b f) d c -> b (f d) c", f=video_length)
-
-        key = self.reshape_heads_to_batch_dim(key)
-        value = self.reshape_heads_to_batch_dim(value)
+        query = rearrange(query, "(b f) d c -> b (f d) c", f=video_length)
+        key = rearrange(key, "(b f) d c -> b (f d) c", f=video_length)
+        value = rearrange(value, "(b f) d c -> b (f d) c", f=video_length)
 
         if attention_mask is not None:
             if attention_mask.shape[-1] != query.shape[1]:
@@ -200,15 +180,19 @@ class FullyFrameAttention(nn.Module):
                 attention_mask = attention_mask.repeat_interleave(
                     self.heads, dim=0)
 
-        # attention, what we cannot get enough of
-        if self._use_memory_efficient_attention_xformers:
+        if comfy.model_management.xformers_enabled():
+            query = self.reshape_heads_to_batch_dim(query)
+            key = self.reshape_heads_to_batch_dim(key)
+            value = self.reshape_heads_to_batch_dim(value)
             hidden_states = self._memory_efficient_attention_xformers(
                 query, key, value, attention_mask)
-            # Some versions of xformers return output in fp32, cast it back to the dtype of the input
             hidden_states = hidden_states.to(query.dtype)
         else:
-            hidden_states = self._other_attention(
+            hidden_states = self._attention_mechanism(
                 query, key, value, attention_mask)
+            query = self.reshape_heads_to_batch_dim(query)
+            key = self.reshape_heads_to_batch_dim(key)
+            value = self.reshape_heads_to_batch_dim(value)
 
         if h in [target_resolution]:
             hidden_states = rearrange(
