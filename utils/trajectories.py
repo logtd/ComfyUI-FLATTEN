@@ -56,7 +56,9 @@ def neighbors_index(point, h_size, w_size, H, W):
 
 def get_window_size(resolution):
     # this isn't always correct and needs an actual calculation
-    if resolution > 64:
+    if resolution > 128:
+        return 8
+    elif resolution > 64:
         return 4
     elif resolution > 32:
         return 2
@@ -73,8 +75,14 @@ def sample_trajectories(frames, model, weights, device):
     clips = list(range(len(frames)))
     frames = rearrange(frames,  "f h w c -> f c h w")
     current_frames, next_frames = frames[clips[:-1]], frames[clips[1:]]
-    list_of_flows = model(current_frames.to(device), next_frames.to(device))
-    predicted_flows = list_of_flows[-1]
+    predicted_flows = None
+    for i in range(0, len(current_frames)):
+        list_of_flows = model(current_frames[i].unsqueeze(0).to(
+            device), next_frames[i].unsqueeze(0).to(device))
+        if predicted_flows is None:
+            predicted_flows = list_of_flows[-1]
+        elif len(list_of_flows) > 0:
+            predicted_flows = torch.cat([predicted_flows, list_of_flows[-1]])
 
     predicted_flows[:, 0] = predicted_flows[:, 0]/image_width
     predicted_flows[:, 1] = predicted_flows[:, 1]/image_height

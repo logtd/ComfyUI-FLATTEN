@@ -95,6 +95,8 @@ class KSamplerFlattenNode:
                 clear_injections(model)
             return self.injection_step
 
+        is_sdxl = model.model._get_name() == 'PatchSDXL'
+
         transformer_options = {
             **original_transformer_options,
             'flatten': {
@@ -103,7 +105,8 @@ class KSamplerFlattenNode:
                 'injection_handler': injection_handler,
                 'input_shape': original_shape,
                 'stage': 'sampling',
-                'injection_steps': injection_steps
+                'injection_steps': injection_steps,
+                'is_sdxl': is_sdxl
             }
         }
         model.model_options['transformer_options'] = transformer_options

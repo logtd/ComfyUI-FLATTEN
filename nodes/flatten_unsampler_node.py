@@ -42,13 +42,15 @@ class UnsamplerFlattenNode:
 
         # SETUP TRANSFORMER OPTIONS
         injection_dict = get_blank_injection_dict(
-            trajectories['context_windows'])
+            trajectories['context_windows'], model)
 
         def save_injections_handler(context_start):
             update_injections(model, injection_dict, context_start, save_steps)
 
         original_transformer_options = model.model_options.get(
             'transformer_options', {})
+
+        is_sdxl = model.model._get_name() == 'PatchSDXL'
 
         transformer_options = {
             **original_transformer_options,
@@ -57,7 +59,8 @@ class UnsamplerFlattenNode:
                 'old_qk': old_qk,
                 'input_shape': original_shape,
                 'stage': 'inversion',
-                'save_injections_handler': save_injections_handler
+                'save_injections_handler': save_injections_handler,
+                'is_sdxl': is_sdxl
             }
         }
         model.model_options['transformer_options'] = transformer_options
