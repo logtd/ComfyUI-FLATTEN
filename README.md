@@ -14,9 +14,7 @@ Original research repo: [FLATTEN](https://github.com/yrcong/flatten)
 ## Installation
 
 ### How to Install
-TODO
-Clone or download this repo into your `ComfyUI/custom_nodes/` directory.
-Then run `pip install -r requirments.txt` within the cloned repo.
+Clone or download this repo into your `ComfyUI/custom_nodes/` directory or use the ComfyUI-Manager to automatically install the nodes. No additional Python packages outside of ComfyUI requirements should be necessary.
 
 ## Nodes
 TODO
