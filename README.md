@@ -28,7 +28,7 @@ TODO
 TODO
 
 ## Scene Editing (Experimental)
-Not included in the original FLATTEN was the use of generating completely new scenes through noise injection that is driven by optical flow. The current implementation is experimental and allows the user to create completely new scenes with details, however it can lose some of the consistency and does not work well with high motion scenes.
+Inspired by the optical flow use in FLATTEN, these nodes can utilize noise that is driven by optical flow. The current implementation is experimental and allows the user to create highly altered scenes, however it can lose some of the consistency and does not work well with high motion scenes.
 
 To use this, it is recommended to use LCM on the KSampler (not the Unsampler) alongside setting `old_qk = 1` on the KSampler. Ancestral sampling methods also work well. Users may experiment with toggling the `add_noise` setting on the KSampler when using a sampling method that injects noise (e.g. anything besides Euler and dpmpp2). Using IPAdapter can help guide these generations towards a specific look.
 
