@@ -35,12 +35,16 @@ https://github.com/logtd/ComfyUI-FLATTEN/assets/160989552/18b49cbb-9647-48c0-9f3
 https://github.com/logtd/ComfyUI-FLATTEN/assets/160989552/13769f9a-05f0-4669-ba80-556a8169e3df
 
 ## ComfyUI Support
-The ComfyUI-FLATTEN implementation can support most ComfyUI nodes, including ControlNets, IP-Adapter, and many more.
+The ComfyUI-FLATTEN implementation can support most ComfyUI nodes, including ControlNets, IP-Adapter, LCM, InstanceDiffusion/GLIGEN, and many more.
 
 ### Batching
 Currently batching for large amount of frames results in a loss in consistency and a possible solution is under consideration.
 
 The current batching mechanism utilizes the AnimateDiff-Evolved batching nodes and is required to batch. 
+
+### SDXL Support
+Experiments for supporting SDXL were made and resulted in generating somewhat consistent videos, but not up-to-par with the SD1.5 implementation. 
+Feel free to check out the `sdxl` branch, but there will be no further development in this direction.
 
 ### Unsupported
 Currently the known unsupported custom ComfyUI features are:
