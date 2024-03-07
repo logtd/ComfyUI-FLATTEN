@@ -493,7 +493,9 @@ class UNetModel(nn.Module):
             timesteps, self.model_channels, repeat_only=False).to(x.dtype)
         emb = self.time_embed(t_emb)
 
+        frame_count = transformer_options['flatten']['video_length']
         if self.num_classes is not None:
+            y = y[th.arange(0, y.size(0), frame_count)]
             assert y.shape[0] == x.shape[0]
             emb = emb + self.label_emb(y)
 
