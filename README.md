@@ -22,10 +22,13 @@ TODO
 ## Accompanying Node Repos
 * [Video Helper Suite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)
 
-## Video Editing
-TODO
+## Examples
+For working ComfyUI example workflows see the `example_workflows/` directory.
 
-## Scene Editing (Experimental)
+### Video Editing
+FLATTEN excels at editing videos with temporal consistency. The recommended settings for this are to use an Unsampler and KSampler with `old_qk = 0`. The Unsampler should use the euler sampler and the KSampler should use the dpmpp_2m sampler. Users may experiment with `old_qk` depending on their use case, but it is not recommended to use other samplers or `add_noise` for video editing. Style transfer nodes such as IP-Adapter may have difficulty making quality edits without the additional noise and will require fine tuning.
+
+### Scene Editing (Experimental)
 Inspired by the optical flow use in FLATTEN, these nodes can utilize noise that is driven by optical flow. The current implementation is experimental and allows the user to create highly altered scenes, however it can lose some of the consistency and does not work well with high motion scenes.
 
 To use this, it is recommended to use LCM on the KSampler (not the Unsampler) alongside setting `old_qk = 1` on the KSampler. Ancestral sampling methods also work well. Users may experiment with toggling the `add_noise` setting on the KSampler when using a sampling method that injects noise (e.g. anything besides Euler and dpmpp2). Using IPAdapter can help guide these generations towards a specific look.
