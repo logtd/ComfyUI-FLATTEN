@@ -37,6 +37,11 @@ https://github.com/logtd/ComfyUI-FLATTEN/assets/160989552/13769f9a-05f0-4669-ba8
 ## Acknowledgements
 * [Cong, Yuren and Xu, Mengmeng and Simon, Christian and Chen, Shoufa and Ren, Jiawei and Xie, Yanping and Perez-Rua, Juan-Manuel and Rosenhahn, Bodo and Xiang, Tao and He, Sen](https://github.com/yrcong/flatten) for their research on FLATTEN, producing the original repo, and contributing to open source.
 * [Kosinkadink](https://github.com/Kosinkadink) for creating Video Helper Suite
+<<<<<<< HEAD
 * [@AIWarper](https://x.com/AIWarper) for testing and sharing amazing content
 * [Kijai](https://github.com/kijai) for creating useful ComfyUI nodes
   
+=======
+* [Kijai](https://github.com/kijai) for making helpful nodes
+* [@AIWarper](https://twitter.com/AIWarper) for testing and making amazing content
+>>>>>>> ab554f2 (Update README.md)
