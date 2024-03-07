@@ -34,6 +34,18 @@ https://github.com/logtd/ComfyUI-FLATTEN/assets/160989552/18b49cbb-9647-48c0-9f3
 
 https://github.com/logtd/ComfyUI-FLATTEN/assets/160989552/13769f9a-05f0-4669-ba80-556a8169e3df
 
+## ComfyUI Support
+The ComfyUI-FLATTEN implementation can support most ComfyUI nodes, including ControlNets, IP-Adapter, and many more.
+
+### Batching
+Currently batching for large amount of frames results in a loss in consistency and a possible solution is under consideration.
+
+The current batching mechanism utilizes the AnimateDiff-Evolved batching nodes and is required to batch. 
+
+### Unsupported
+Currently the known unsupported custom ComfyUI features are:
+* Scheduled Prompting
+
 ## Acknowledgements
 * [Cong, Yuren and Xu, Mengmeng and Simon, Christian and Chen, Shoufa and Ren, Jiawei and Xie, Yanping and Perez-Rua, Juan-Manuel and Rosenhahn, Bodo and Xiang, Tao and He, Sen](https://github.com/yrcong/flatten) for their research on FLATTEN, producing the original repo, and contributing to open source.
 * [Kosinkadink](https://github.com/Kosinkadink) for creating Video Helper Suite
