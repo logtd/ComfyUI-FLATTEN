@@ -41,6 +41,8 @@ https://github.com/logtd/ComfyUI-FLATTEN/assets/160989552/13769f9a-05f0-4669-ba8
 
 https://github.com/logtd/ComfyUI-FLATTEN/assets/160989552/f6fcf5c4-df0e-4ca4-8411-388520442d6c
 
+https://github.com/logtd/ComfyUI-FLATTEN/assets/160989552/d9942a82-aadb-49a6-92f4-9bf95de390ed
+
 ## ComfyUI Support
 The ComfyUI-FLATTEN implementation can support most ComfyUI nodes, including ControlNets, IP-Adapter, LCM, InstanceDiffusion/GLIGEN, and many more.
 
