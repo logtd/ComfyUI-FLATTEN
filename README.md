@@ -3,6 +3,8 @@ ComfyUI nodes to use FLATTEN.
 
 Original research repo: [FLATTEN](https://github.com/yrcong/flatten)
 
+https://github.com/logtd/ComfyUI-FLATTEN/assets/160989552/518865fe-8bf3-44aa-ab05-edaaff92c3e0
+
 ## Table of Contents
 - [Installation](#installation)
   - [How to Install](#how-to-install)
