@@ -9,7 +9,7 @@ class TrajectoryNode:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {"images": ("IMAGE", ),
-                             "context_length": ("INT", {"default": 20, "min": 0, "max": 40, "step": 1}),
+                             "context_length": ("INT", {"default": 20, "min": 0, "max": 999, "step": 1}),
                              "context_overlap": ("INT", {"default": 10, "min": 0, "step": 1}),
                              }}
     RETURN_TYPES = ("TRAJECTORY",)
