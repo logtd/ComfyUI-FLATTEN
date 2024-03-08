@@ -14,7 +14,7 @@ class PatchBaseModel(comfy.model_base.BaseModel):
 
 
 class PatchSDXL(PatchBaseModel):
-    def __init__(self, model_config, model_type=ModelType.EPS, device=None):
+    def __init__(self, model_config, model_type=comfy.model_base.ModelType.EPS, device=None):
         super().__init__(model_config, model_type, device=device)
         self.embedder = openaimodel.Timestep(256)
         self.noise_augmentor = CLIPEmbeddingNoiseAugmentation(
