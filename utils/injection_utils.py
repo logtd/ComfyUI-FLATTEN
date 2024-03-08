@@ -3,7 +3,7 @@ import torch
 
 def _get_xl_resnets(model):
     obs = model.output_blocks
-    return [obs[0][0], obs[1][0], obs[4][0], obs[5][0], obs[3][0], obs[2][0]]
+    return [obs[0][0], obs[1][0], obs[4][0], obs[5][0]]
 
 
 def _get_xl_attns(model):
@@ -12,8 +12,6 @@ def _get_xl_attns(model):
         obs[2][1],
         obs[3][1],
         obs[4][1],
-        obs[5][1],
-        obs[1][1]
     ]
     attentions = []
     for transformer in transformers:
