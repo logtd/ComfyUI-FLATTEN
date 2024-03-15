@@ -1,4 +1,4 @@
-# ComfyUI-FLATTEN (Work in Progress)
+# ComfyUI-FLATTEN
 ComfyUI nodes to use FLATTEN.
 
 Original research repo: [FLATTEN](https://github.com/yrcong/flatten)
@@ -19,10 +19,32 @@ https://github.com/logtd/ComfyUI-FLATTEN/assets/160989552/518865fe-8bf3-44aa-ab0
 Clone or download this repo into your `ComfyUI/custom_nodes/` directory or use the ComfyUI-Manager to automatically install the nodes. No additional Python packages outside of ComfyUI requirements should be necessary.
 
 ## Nodes
-TODO
+<img width="843" alt="flatten_nodes_screenshot" src="https://github.com/logtd/ComfyUI-FLATTEN/assets/160989552/3ea92d0c-b484-4290-9ed2-a07b5031a4c5">
+
+* Node: Load Checkpoint with FLATTEN model
+  * Loads any given SD1.5 checkpoint with the FLATTEN optical flow model. Use the `sdxl` branch of this repo to load SDXL models
+  * The loaded model only works with the Flatten KSampler and a standard ComfyUI checkpoint loader is required for other KSamplers
+ 
+* Node: Sample Trajectories
+  * Takes the input images and samples their optical flow into trajectories. Trajectories are created for the dimensions of the input image and must match the latent size Flatten processes.
+  * Context Length and Overlap for Batching with AnimateDiff-Evolved
+    * Context Length defines the window size Flatten processes at a time. Flatten is not limitted to a certain frame count, but this can be used to reduce VRAM usage at a single time
+    * Context Overlap is the overlap between windows
+    * Can only use Standard Static from AnimateDiff-Evolved and these values must match the values given to AnimateDiff's Evolved Sampling context
+    * Currently does not support Views
+   
+* Node: Unsampler (Flatten)
+  * Unsamples the input latent and creates the needed injections required for sampling
+  * Only use Euler or ddpm2m as the sampling method since this process creates noise from the input images
+ 
+* Node: KSampler (Flatten)
+  * Samples the unsampled latents and uses the injections from the Unsampler
+  * Can use any sampling method, but use Euler or ddpm2m for editing pieces of the video or another sampling method to get drastic changes in the video
+
 
 ## Accompanying Node Repos
-* [Video Helper Suite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)
+* [Video Helper Suite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) for loading and combining videos
+* [AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) for batching options
 
 ## Examples
 For working ComfyUI example workflows see the `example_workflows/` directory.
@@ -49,7 +71,7 @@ The ComfyUI-FLATTEN implementation can support most ComfyUI nodes, including Con
 ### Batching
 Currently batching for large amount of frames results in a loss in consistency and a possible solution is under consideration.
 
-The current batching mechanism utilizes the AnimateDiff-Evolved batching nodes and is required to batch. 
+The current batching mechanism utilizes the AnimateDiff-Evolved batching nodes and is required to batch. See the example workflow for a working example.
 
 ### SDXL Support
 Experiments for supporting SDXL were made and resulted in generating somewhat consistent videos, but not up-to-par with the SD1.5 implementation. 
@@ -58,9 +80,10 @@ Feel free to check out the `sdxl` branch, but there will be no further developme
 ### Unsupported
 Currently the known unsupported custom ComfyUI features are:
 * Scheduled Prompting
+* Context Views for advanced batching
 
 ## Acknowledgements
 * [Cong, Yuren and Xu, Mengmeng and Simon, Christian and Chen, Shoufa and Ren, Jiawei and Xie, Yanping and Perez-Rua, Juan-Manuel and Rosenhahn, Bodo and Xiang, Tao and He, Sen](https://github.com/yrcong/flatten) for their research on FLATTEN, producing the original repo, and contributing to open source.
-* [Kosinkadink](https://github.com/Kosinkadink) for creating Video Helper Suite
+* [Kosinkadink](https://github.com/Kosinkadink) for creating Video Helper Suite and AnimateDiff-Evolved
 * [Kijai](https://github.com/kijai) for making helpful nodes
 * [@AIWarper](https://twitter.com/AIWarper) for testing and making amazing content
