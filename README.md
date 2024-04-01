@@ -40,6 +40,14 @@ Clone or download this repo into your `ComfyUI/custom_nodes/` directory or use t
 * Node: KSampler (Flatten)
   * Samples the unsampled latents and uses the injections from the Unsampler
   * Can use any sampling method, but use Euler or ddpm2m for editing pieces of the video or another sampling method to get drastic changes in the video
+ 
+* Node: Apply Flatten Attention (SD1.5 Only)
+  * Use Flatten's Optical Flow attention mechanism without the rest of Flatten's model -- can be used to combine with other models
+  * Warning: Flatten's attention requires "Flow Noise" so it does not always work with methods that add normal noise
+ 
+* Node: Create Flow Noise
+  * Creates flow noise given a latent and trajectories
+  * Can be used to add initial noise to a latent instead of using normal noise from a traditional KSampler
 
 
 ## Accompanying Node Repos
