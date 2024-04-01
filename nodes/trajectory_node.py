@@ -29,6 +29,8 @@ class TrajectoryNode:
         trajectory = {
             'trajectory_windows': {},
             'context_windows': windows,
+            'height': images.shape[1],
+            'width': images.shape[2]
         }
         for i, window in enumerate(windows):
             traj = sample_trajectories(images[window], model, weights, device)
