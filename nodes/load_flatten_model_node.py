@@ -2,6 +2,7 @@ import torch
 from einops import rearrange
 import comfy.sd
 import comfy.model_base
+import comfy.model_management
 import folder_paths
 import comfy.ldm.modules.diffusionmodules.openaimodel as openaimodel
 from ..modules.unet import UNetModel as FlattenModel
@@ -95,4 +96,12 @@ class FlattenCheckpointLoaderNode:
         model = out[0]
         model.model_options['model_function_wrapper'] = model_function_wrapper
 
+        load_device = comfy.model_management.get_torch_device()
+        offload_device = comfy.model_management.unet_offload_device()
+        model_patcher = comfy.model_patcher.ModelPatcher(
+            model.model, load_device=load_device, offload_device=offload_device, current_device=offload_device)
+
+        out = list(out)
+        out[0] = model_patcher
+        model_patcher.model_options['model_function_wrapper'] = model_function_wrapper
         return out[:3]

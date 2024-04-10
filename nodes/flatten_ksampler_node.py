@@ -65,7 +65,7 @@ class KSamplerFlattenNode:
             noise = torch.cat([noise[0].unsqueeze(0)] * original_shape[0])
 
         # SETUP SIGMAS AND STEPS
-        sampler = comfy.samplers.KSampler(model.model, steps=steps, device=device, sampler=sampler_name,
+        sampler = comfy.samplers.KSampler(model, steps=steps, device=device, sampler=sampler_name,
                                           scheduler=scheduler, denoise=1.0, model_options=model.model_options)
 
         sigmas = sampler.sigmas

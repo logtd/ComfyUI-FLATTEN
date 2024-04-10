@@ -75,7 +75,7 @@ class UnsamplerFlattenNode:
                 latent["noise_mask"], latent_image.shape, device)
 
         # SETUP SAMPLING
-        sampler = comfy.samplers.KSampler(model.model, steps=steps, device=device, sampler=sampler_name,
+        sampler = comfy.samplers.KSampler(model, steps=steps, device=device, sampler=sampler_name,
                                           scheduler=scheduler, denoise=1.0, model_options=model.model_options)
         ksampler = comfy.samplers.ksampler(sampler_name)
 
