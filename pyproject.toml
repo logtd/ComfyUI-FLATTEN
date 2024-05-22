@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-flatten"
-description = ""
+description = "ComfyUI nodes to use [FLATTEN: optical FLow-guided ATTENtion for consistent text-to-video editing](https://github.com/yrcong/flatten)."
 version = "1.0.0"
 license = "LICENSE"
 dependencies = []
