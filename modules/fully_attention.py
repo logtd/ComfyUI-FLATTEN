@@ -141,6 +141,23 @@ class FullyFrameAttention(nn.Module):
         batch_size, sequence_length, _ = hidden_states.shape
         flatten_options = transformer_options['flatten']
 
+        transformer_block = transformer_options.get('block', ('', -1))[0]
+        transformer_index = transformer_options.get('transformer_index', -1)
+        patches_replace = transformer_options.get('patches_replace', {})
+        attn1_replace = patches_replace.get('attn1', {})
+        block = (transformer_block, transformer_index)
+        if block in attn1_replace:
+            replace_fn = attn1_replace[block]
+            hidden_states = replace_fn(
+                self.to_q(hidden_states),
+                self.to_k(hidden_states),
+                self.to_v(hidden_states),
+                extra_options=transformer_options
+            )
+            hidden_states = self.to_out[0](hidden_states)
+            hidden_states = self.to_out[1](hidden_states)
+            return hidden_states
+
         h = traj_options['height']
         w = traj_options['width']
         target_resolution = flatten_options['input_shape'][-2]
