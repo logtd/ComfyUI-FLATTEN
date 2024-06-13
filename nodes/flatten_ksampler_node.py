@@ -2,6 +2,7 @@ import torch
 import comfy.sd
 import comfy.model_base
 import comfy.samplers
+import comfy.sample
 import comfy.k_diffusion.sampling
 
 from ..utils.injection_utils import inject_features, clear_injections
@@ -16,7 +17,7 @@ class KSamplerFlattenNode:
                  "add_noise": (["disable", "enable"], ),
                  "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                  "steps": ("INT", {"default": 10, "min": 1, "max": 10000}),
-                 "injection_steps": ("INT", {"default": 8, "min": 1, "max": 10000}),
+                 "injection_steps": ("INT", {"default": 8, "min": 0, "max": 10000}),
                  "old_qk": ("INT", {"default": 0, "min": 0, "max": 1}),
                  "trajectories": ("TRAJECTORY",),
                  "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
@@ -51,8 +52,7 @@ class KSamplerFlattenNode:
         # SETUP NOISE
         noise_mask = None
         if "noise_mask" in latent:
-            noise_mask = comfy.sample.prepare_mask(
-                latent["noise_mask"], latent_image.shape, device)
+            noise_mask = latent["noise_mask"]
 
         add_noise = add_noise == 'enable'
         if not add_noise:

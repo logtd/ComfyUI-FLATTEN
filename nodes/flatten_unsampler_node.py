@@ -1,9 +1,41 @@
+from tqdm import trange
 import comfy.samplers
 import torch
 import comfy.k_diffusion.sampling
+import comfy.sample
 
 from ..utils.injection_utils import get_blank_injection_dict, clear_injections, update_injections
 from ..utils.flow_noise import create_noise_generator
+
+
+@torch.no_grad()
+def sample_inversed_euler(model, x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
+    """Implements Algorithm 2 (Euler steps) from Karras et al. (2022)."""
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+    latents = []
+    for i in trange(1, len(sigmas), disable=disable):
+        sigma_in = sigmas[i-1]
+
+        if i == 1:
+            sigma_t = sigmas[i]
+        else:
+            sigma_t = sigma_in
+
+        denoised = model(x, sigma_t * s_in, **extra_args)
+
+        if i == 1:
+            d = (x - denoised) / (2 * sigmas[i])
+        else:
+            d = (x - denoised) / sigmas[i-1]
+
+        dt = sigmas[i] - sigmas[i-1]
+        x = x + d * dt
+        if callback is not None:
+            callback(
+                {'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+    return x / sigmas[-1]
 
 
 class UnsamplerFlattenNode:
@@ -71,15 +103,21 @@ class UnsamplerFlattenNode:
 
         noise_mask = None
         if "noise_mask" in latent:
-            noise_mask = comfy.sample.prepare_mask(
-                latent["noise_mask"], latent_image.shape, device)
+            noise_mask = latent["noise_mask"]
 
         # SETUP SAMPLING
+        inversed_euler = sampler_name == 'inverse_euler'
+        if inversed_euler:
+            sampler_name = 'euler'
         sampler = comfy.samplers.KSampler(model, steps=steps, device=device, sampler=sampler_name,
                                           scheduler=scheduler, denoise=1.0, model_options=model.model_options)
         ksampler = comfy.samplers.ksampler(sampler_name)
 
-        sigmas = sigmas = sampler.sigmas.flip(0) + 0.0001
+        if inversed_euler:
+            ksampler.sampler_function = sample_inversed_euler
+            sigmas = sampler.sigmas.flip(0)
+        else:
+            sigmas = sampler.sigmas.flip(0) + 0.0001
 
         pbar = comfy.utils.ProgressBar(steps)
 
