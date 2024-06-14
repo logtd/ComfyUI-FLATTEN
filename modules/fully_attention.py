@@ -197,19 +197,11 @@ class FullyFrameAttention(nn.Module):
                 attention_mask = attention_mask.repeat_interleave(
                     self.heads, dim=0)
 
-        if comfy.model_management.xformers_enabled():
-            query = self.reshape_heads_to_batch_dim(query)
-            key = self.reshape_heads_to_batch_dim(key)
-            value = self.reshape_heads_to_batch_dim(value)
-            hidden_states = self._memory_efficient_attention_xformers(
-                query, key, value, attention_mask)
-            hidden_states = hidden_states.to(query.dtype)
-        else:
-            hidden_states = self._attention_mechanism(
-                query, key, value, attention_mask)
-            query = self.reshape_heads_to_batch_dim(query)
-            key = self.reshape_heads_to_batch_dim(key)
-            value = self.reshape_heads_to_batch_dim(value)
+        hidden_states = self._attention_mechanism(
+            query, key, value, attention_mask)
+        query = self.reshape_heads_to_batch_dim(query)
+        key = self.reshape_heads_to_batch_dim(key)
+        value = self.reshape_heads_to_batch_dim(value)
 
         if h in [target_resolution]:
             hidden_states = rearrange(
