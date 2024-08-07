@@ -99,7 +99,7 @@ class FlattenCheckpointLoaderNode:
         load_device = comfy.model_management.get_torch_device()
         offload_device = comfy.model_management.unet_offload_device()
         model_patcher = comfy.model_patcher.ModelPatcher(
-            model.model, load_device=load_device, offload_device=offload_device, current_device=offload_device)
+            model.model, load_device=load_device, offload_device=offload_device)
 
         out = list(out)
         out[0] = model_patcher
